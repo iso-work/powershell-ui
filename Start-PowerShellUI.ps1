@@ -95,6 +95,22 @@ $list.Add_SelectedIndexChanged({
         $fields.Controls.Add($control); $script:inputs[$parameter.name]=$control
     }
 })
+function Show-ReportResult {
+            $reportText.Text=Get-Content -LiteralPath $script:lastReport.MarkdownPath -Raw
+            $jsonText.Text=Get-Content -LiteralPath $script:lastReport.JsonPath -Raw
+            $data=$jsonText.Text | ConvertFrom-Json -AsHashtable
+            $table=[Data.DataTable]::new()
+            $rows=@($data.records | Select-Object -First 5000)
+            foreach($record in $rows) { foreach($key in $record.Keys) { if(-not $table.Columns.Contains($key)) { [void]$table.Columns.Add($key,[string]) } } }
+            foreach($record in $rows) {
+                $row=$table.NewRow()
+                foreach($key in $record.Keys) { $value=$record[$key]; $row[$key]=if($null -eq $value) { '' } elseif($value -is [string] -or $value -is [ValueType]) { [string]$value } else { ConvertTo-Json -InputObject $value -Depth 50 -Compress } }
+                $table.Rows.Add($row)
+            }
+            $grid.DataSource=$table
+            $gridTab.Text="Record table ($($rows.Count) shown; full data in JSON)"
+
+}
 $timer=[Windows.Forms.Timer]::new(); $timer.Interval=300
 $timer.Add_Tick({
     $message=''
@@ -112,19 +128,7 @@ $timer.Add_Tick({
             $script:lastReport=Write-LauncherReport $script:activeManifest $script:activeParameters $fallback $fallbackStatus $fallbackDirectory $script:activeStarted 'Collection stopped before a completed report was returned.'
         }
         if($script:lastReport) {
-            $reportText.Text=Get-Content -LiteralPath $script:lastReport.MarkdownPath -Raw
-            $jsonText.Text=Get-Content -LiteralPath $script:lastReport.JsonPath -Raw
-            $data=$jsonText.Text | ConvertFrom-Json -AsHashtable
-            $table=[Data.DataTable]::new()
-            $rows=@($data.records | Select-Object -First 5000)
-            foreach($record in $rows) { foreach($key in $record.Keys) { if(-not $table.Columns.Contains($key)) { [void]$table.Columns.Add($key,[string]) } } }
-            foreach($record in $rows) {
-                $row=$table.NewRow()
-                foreach($key in $record.Keys) { $value=$record[$key]; $row[$key]=if($null -eq $value) { '' } elseif($value -is [string] -or $value -is [ValueType]) { [string]$value } else { ConvertTo-Json -InputObject $value -Depth 50 -Compress } }
-                $table.Rows.Add($row)
-            }
-            $grid.DataSource=$table
-            $gridTab.Text="Record table ($($rows.Count) shown; full data in JSON)"
+            Show-ReportResult
             $status.AppendText([Environment]::NewLine+"$($script:lastReport.Report.status): $($script:lastReport.JsonPath)")
             $open.Enabled=$true; $tabs.SelectedTab=$resultTab
         } else { $status.AppendText([Environment]::NewLine+'No completed report was returned. Collection failed or was cancelled.') }
@@ -190,16 +194,33 @@ try {
             $list.SelectedIndex=$index
             if(-not $run.Enabled -or $script:inputs.Count -eq 0) { throw 'Manifest parameter controls or integrity gate failed.' }
         }
-        'PASS: three manifests, directions, typed parameter controls and integrity gate initialize in the Windows UI.'
+        $displayFixture=Join-Path ([IO.Path]::GetTempPath()) ('launcher-display-'+[guid]::NewGuid())
+        [void](New-Item -ItemType Directory -Path $displayFixture)
+        try {
+            $fixtureManifest=@{id='display-fixture';name='Synthetic display';purpose='Offline display verification';source='test'}
+            $fixtureResult=[pscustomobject]@{Summary='Synthetic fixture';Records=@([pscustomobject]@{Id='display-1';Name='Example';Data=@{Healthy=$true}});Limitations=@('Synthetic, not tenant data.')}
+            $script:lastReport=Write-LauncherReport $fixtureManifest @{} $fixtureResult 'Completed' $displayFixture ([DateTime]::UtcNow)
+            Show-ReportResult
+            if($grid.DataSource.Rows.Count -ne 1 -or $reportText.Text -notmatch 'Synthetic fixture' -or $jsonText.Text -notmatch 'display-1') { throw 'Report display failed.' }
+        } finally {
+            Remove-Item -LiteralPath (Join-Path $displayFixture 'report.json'),(Join-Path $displayFixture 'report.md') -Force
+            Remove-Item -LiteralPath $displayFixture
+            $script:lastReport=$null
+        }
+        'PASS: three manifests, directions, typed parameter controls, integrity gate, readable report, record table and JSON initialize in the Windows UI.'
     } else { [void]$form.ShowDialog() }
 } finally {
-    Stop-Report
-    if($script:worker) { $script:worker.Dispose() }
-    if($null -ne $script:job -and $script:session.ContainsKey('RunDirectory') -and $script:session.RunDirectory -and -not(Test-Path -LiteralPath (Join-Path $script:session.RunDirectory 'report.json'))) {
-        $cancelled=[pscustomobject]@{Summary='Launcher closed before collection completed.';Records=@();Limitations=@('Cancelled collection. No complete data is available.')}
-        [void](Write-LauncherReport $script:activeManifest $script:activeParameters $cancelled 'Cancelled' $script:session.RunDirectory $script:activeStarted 'Launcher closed before completion.')
+    try {
+        Stop-Report
+        if($script:worker) { $script:worker.Dispose() }
+        if($null -ne $script:job -and $script:session.ContainsKey('RunDirectory') -and $script:session.RunDirectory -and -not(Test-Path -LiteralPath (Join-Path $script:session.RunDirectory 'report.json'))) {
+            $cancelled=[pscustomobject]@{Summary='Launcher closed before collection completed.';Records=@();Limitations=@('Cancelled collection. No complete data is available.')}
+            [void](Write-LauncherReport $script:activeManifest $script:activeParameters $cancelled 'Cancelled' $script:session.RunDirectory $script:activeStarted 'Launcher closed before completion.')
+        }
+    } finally {
+        Clear-LauncherSession $script:session
+        $script:session=$null; $timer.Dispose(); $form.Dispose()
     }
-    Clear-LauncherSession $script:session
-    $script:session=$null; $timer.Dispose(); $form.Dispose()
 }
+
 

@@ -16,6 +16,10 @@ Assert ($catalog.Count -eq 3) 'Expected three manifest-only reporting adapters.'
 foreach($item in $catalog) { Assert ($item.Errors.Count -eq 0) "Adapter integrity: $($item.Name): $($item.Errors)" }
 Assert (@($catalog | Where-Object Path -match 'upstream').Count -eq 0) 'Upstream management scripts must not be exposed.'
 $session=New-LauncherSession
+Assert ((Resolve-LauncherTenant 'Contoso.onmicrosoft.com') -eq 'contoso.onmicrosoft.com') 'Verified tenant-domain input failed.'
+$tenantBlocked=$false
+try { Resolve-LauncherTenant 'contoso.com/../../common?x=1' } catch { $tenantBlocked=$true }
+Assert $tenantBlocked 'Unsafe tenant authority input was accepted.'
 $secret=ConvertTo-SecureString 'fixture-password' -AsPlainText -Force
 $session.Credentials.ActiveDirectory=[pscredential]::new('fixture-user',$secret)
 $storedSecret=$session.Credentials.ActiveDirectory.Password

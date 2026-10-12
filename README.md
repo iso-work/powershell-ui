@@ -41,7 +41,7 @@ For Intune, create or use a dedicated Microsoft Entra public client application 
 - DeviceManagementApps.Read.All
 - DeviceManagementManagedDevices.Read.All only when device inventory is requested
 
-Enter tenant/application GUIDs in Parameters. On first run the status pane displays Microsoft's sign-in URL and a one-time code. Sign in in your browser; MFA and tenant conditional-access rules apply. The launcher itself saves no browser login or refresh token and requests no offline_access scope. Access tokens are cached only in session memory and reused until near expiry. It requests read scopes and rejects unexpected/write scopes returned by sign-in. Browser sign-in may retain its own cookies according to your browser settings.
+Enter the tenant GUID or verified domain and the application GUID in Parameters. On first run the status pane displays Microsoft's sign-in URL and a one-time code. Sign in in your browser; MFA and tenant conditional-access rules apply. The launcher itself saves no browser login or refresh token and requests no offline_access scope. Access tokens are cached only in session memory and reused until near expiry. It requests read scopes and rejects unexpected/write scopes returned by sign-in. Browser sign-in may retain its own cookies according to your browser settings.
 
 Only public Microsoft Azure/Graph endpoints are supported by these adapters.
 

@@ -17,10 +17,19 @@ function Clear-LauncherSession {
     foreach($token in @($Session.Tokens.Values)) { $token.Dispose() }
     $Session.Credentials.Clear(); $Session.Tokens.Clear(); $Session.TokenMetadata.Clear()
 }
+function Resolve-LauncherTenant {
+    param([string]$Value)
+    $value=$Value.Trim().ToLowerInvariant()
+    $identifier=[guid]::Empty
+    if([guid]::TryParse($value,[ref]$identifier) -and $identifier -ne [guid]::Empty) { return $identifier.ToString() }
+    if($value.Length -le 253 -and $value -match '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$') { return $value }
+    throw 'Enter a tenant GUID or verified DNS tenant domain.'
+}
 function Connect-LauncherGraph {
     param([hashtable]$Parameters,[hashtable]$Context)
-    $tenant=([guid]$Parameters.TenantId).ToString()
+    $tenant=Resolve-LauncherTenant ([string]$Parameters.TenantId)
     $client=([guid]$Parameters.ClientId).ToString()
+    if([guid]$client -eq [guid]::Empty) { throw 'Enter a non-empty public client application ID.' }
     $scopes=@('https://graph.microsoft.com/DeviceManagementConfiguration.Read.All','https://graph.microsoft.com/DeviceManagementApps.Read.All')
     if($Parameters.IncludeDevices) { $scopes+='https://graph.microsoft.com/DeviceManagementManagedDevices.Read.All' }
     $scope=$scopes -join ' '
@@ -157,5 +166,5 @@ function Invoke-LauncherAdapter {
     }
     Write-LauncherReport $Manifest $Parameters $result $status $runDirectory $started $errorMessage
 }
-Export-ModuleMember -Function New-LauncherSession,Clear-LauncherSession,Connect-LauncherGraph,Protect-ReportData,Write-LauncherReport,Invoke-LauncherAdapter
+Export-ModuleMember -Function New-LauncherSession,Clear-LauncherSession,Resolve-LauncherTenant,Connect-LauncherGraph,Protect-ReportData,Write-LauncherReport,Invoke-LauncherAdapter
 
