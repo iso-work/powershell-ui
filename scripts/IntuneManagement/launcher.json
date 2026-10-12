@@ -36,5 +36,30 @@
     "repository": "https://github.com/Micke-K/IntuneManagement",
     "commit": "1bd21513584c7decbe574fcaca6668c3a54e0603",
     "copiedUtc": "2026-10-12T18:53:16.9716873Z"
+  },
+  "displayName": "Intune configuration",
+  "guide": {
+    "outcomes": [
+      "Policy and application inventory, collection counts, and optional device records.",
+      "Per-collection status so access failures are distinguishable from empty results.",
+      "Local Markdown and JSON files with LLM processing instructions."
+    ],
+    "notes": [
+      "No policy or tenant setting is changed.",
+      "This is a scoped inventory. It does not include assignments, effective policy or every settings catalog value.",
+      "Microsoft sign-in is separate from saved directory and Azure application credentials. Its access token is reused in launcher memory and cleared on exit."
+    ],
+    "prerequisites": [
+      "Your Microsoft Entra tenant ID or verified tenant domain, such as contoso.onmicrosoft.com.",
+      "The application ID of an existing public client registration configured for device-code sign-in.",
+      "The read permissions listed in Technical details, an Intune license, and an account with visibility into the intended scope."
+    ],
+    "steps": [
+      "Open Parameters. Enter your tenant and the public client application ID.",
+      "Optionally select Include managed device inventory.",
+      "Choose Run report. Sign-in instructions and a one-time code will appear in the status area.",
+      "Complete Microsoft sign-in in your browser, then return to the launcher for the report."
+    ],
+    "overview": "Review Intune configuration profiles, compliance policies, applications and settings catalog policy metadata. Optionally include a limited device inventory."
   }
 }

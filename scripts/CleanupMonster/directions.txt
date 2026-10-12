@@ -4,7 +4,7 @@ PURPOSE
 CleanupMonster is an upstream PowerShell project for identifying and cleaning old
 Active Directory and cloud device records. Its full workflows can disable, move,
 retire, and delete records. This launcher offers a separate AD computer inventory
-adapter that reads only. The copied upstream/ directory is reference material and
+adapter that reads only. The copied upstream\ directory is reference material and
 is never imported or executed by this entry point.
 
 WHAT THIS REPORT DOES

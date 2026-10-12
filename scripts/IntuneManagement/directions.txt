@@ -3,7 +3,7 @@ INTUNEMANAGEMENT - READ-ONLY INVENTORY
 PURPOSE
 This report helps a user or LLM understand the Intune configuration profiles, compliance policies, applications and settings catalog policy metadata visible to the signed-in account. An optional device inventory shows device platform, compliance, encryption and recent synchronization information. It reads tenant data and produces local report files and a results view in the launcher.
 
-This folder contains a custom scoped reporting adapter. The upstream project is a full management application with import, delete, copy and other write operations. Its source copy is retained in upstream/ for reference and license provenance. The launcher runs Invoke-Report.ps1, never the upstream Start-IntuneManagement.ps1 or its full GUI.
+This folder contains a custom scoped reporting adapter. The upstream project is a full management application with import, delete, copy and other write operations. Its source copy is retained in upstream\ for reference and license provenance. The launcher runs Invoke-Report.ps1, never the upstream Start-IntuneManagement.ps1 or its full GUI.
 
 REQUIREMENTS AND SIGN-IN
 Use an existing Microsoft Entra public-client app registration in the target tenant. Device-code authentication must be permitted by that app and tenant policy (Authentication > Allow public client flows). An administrator must separately grant the required delegated Microsoft Graph read permissions and any necessary consent before use. The launcher does not create or modify app registrations, grant consent or alter tenant settings.
@@ -19,9 +19,9 @@ Use an app and user with read-only authorization. Do not add ReadWrite permissio
 The launcher's session vault holds the Graph token as SecureString in memory and reuses the session when applicable. No credentials are stored in this adapter, directions, JSON manifest or report. The adapter briefly creates an Authorization header in memory solely for HTTPS requests and clears its reference afterward. The launcher clears its credential/session vault on exit. Signing out of the launcher does not remove independent browser or Windows sign-in sessions.
 
 PARAMETERS AND RUNNING
-1. Select IntuneManagement - Read-only inventory in the launcher.
+1. Select Intune configuration in the launcher and read Start here.
 2. Enter Tenant ID or verified tenant domain (for example contoso.onmicrosoft.com).
-3. Enter the public client application ID (the app registration's Application/Client ID).
+3. Enter the public client application ID (the app registration's Application (client) ID).
 4. Optionally select Include managed device inventory.
 5. Run the report, complete the Microsoft device-code sign-in shown by the launcher, and wait for collection to finish.
 6. Review Summary and Records in the results UI. Open the generated report from the output location shown by the launcher.

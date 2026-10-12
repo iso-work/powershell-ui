@@ -9,5 +9,13 @@ if not defined LAUNCHER_PS (
   pause
   exit /b 1
 )
+pushd "%~dp0"
+if errorlevel 1 exit /b 1
 "%LAUNCHER_PS%" -NoProfile -STA -File "%~dp0Start-PowerShellUI.ps1" %*
-if errorlevel 1 pause
+set "LAUNCHER_EXIT=%ERRORLEVEL%"
+popd
+if not "%LAUNCHER_EXIT%"=="0" (
+  echo Launcher stopped. Review the error above.
+  pause
+)
+exit /b %LAUNCHER_EXIT%

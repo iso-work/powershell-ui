@@ -28,7 +28,7 @@ foreach($errorItem in $parseErrors) { $errors.Add($errorItem.Message) }
 if(-not $registry.ContainsKey($manifest.id) -or $registry[$manifest.id] -ne $hash) { $errors.Add('Adapter has not passed the registered integrity check.') }
 $directions=Join-Path $directory 'directions.txt'
 $usage=if(Test-Path -LiteralPath $directions) { Get-Content -LiteralPath $directions -Raw } else { 'Missing directions.txt'; $errors.Add('Missing directions.txt') }
-[pscustomobject]@{Name=$manifest.name;Purpose=$manifest.purpose;Path=$entry;Manifest=$manifest;Hash=$hash;Parameters=@($manifest.parameters);Usage=$usage;Errors=@($errors)}
+[pscustomobject]@{Name=$manifest.name;DisplayName=$(if($manifest.ContainsKey('displayName')){$manifest.displayName}else{$manifest.name});Purpose=$manifest.purpose;Path=$entry;Manifest=$manifest;Hash=$hash;Parameters=@($manifest.parameters);Usage=$usage;Errors=@($errors)}
 } catch { Write-Warning "Invalid manifest: $path" }
 }
 }

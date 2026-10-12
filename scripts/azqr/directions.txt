@@ -8,19 +8,19 @@ plan status. It does not remediate, delete, update, deploy, enable diagnostics,
 or change any Azure resource. Local report files are the intended writes.
 
 Source copy and reviewed version
-The upstream repository copy is in upstream/ and keeps its original licenses.
+The upstream repository copy is in upstream\ and keeps its original licenses.
 Project: https://github.com/Azure/azqr
 Reviewed stable binary: version 4.2.0 (release tag v.4.2.0, October 9, 2026).
 Source copies are reference material and are not automatically runnable entries.
 
 Prerequisites
 1. Optional local setup (from the launcher root directory):
-   pwsh -File scripts/azqr/Install-Azqr.ps1
+   pwsh -File .\scripts\azqr\Install-Azqr.ps1
    Windows PowerShell also works:
-   powershell.exe -NoProfile -File scripts/azqr/Install-Azqr.ps1
+   powershell.exe -NoProfile -File .\scripts\azqr\Install-Azqr.ps1
    This installer downloads the pinned Windows release for your CPU, verifies
    the ZIP against pinned and published SHA256 values, verifies the executable,
-   and copies only azqr.exe into tools/azqr.exe. It does not execute the binary,
+   and copies only azqr.exe into tools\azqr.exe. It does not execute the binary,
    authenticate, change Azure resources, or install modules. The GUI defaults to
    this path. Different existing executables are preserved and not overwritten.
    The tools directory is excluded from source control.
@@ -44,9 +44,10 @@ Prerequisites
    already have Azure Reader at the subscription being scanned. Give it no
    write roles. Setting up an application or changing its role is outside this
    read-only report. The launcher performs neither operation.
-3. In the launcher's session credential store, add AzureServicePrincipal:
-   username = application/client ID GUID
-   password = client secret
+3. Open Session credentials and choose Azure application:
+   Application ID = the application (client) ID GUID
+   Client secret = the secret value, not its identifier
+   The internal credential key used by adapters is AzureServicePrincipal.
    Supply TenantId and SubscriptionId as GUIDs. ResourceGroup is optional.
 4. The machine must reach Microsoft Entra and Azure management endpoints.
    This integration supports Azure Public Cloud only.
@@ -70,8 +71,8 @@ Executable trust also relies on the local directory being protected against
 replacement while the launcher is running; keep the binary in a trusted folder.
 
 Run from the GUI
-Select this report, read these directions, save the AzureServicePrincipal
-credential, enter the required values, and choose Run. Scan scope is exactly one
+Select Azure resource review, read Start here, save the Azure application session
+credential, enter the required values in Parameters, and choose Run report. Scan scope is exactly one
 subscription with an optional resource group. The read-only scan can take several
 minutes. It has a 30-minute limit; narrow scope if that limit is reached.
 
@@ -131,7 +132,7 @@ Pinned plugin discovery:
 https://github.com/Azure/azqr/blob/v.4.2.0/internal/plugins/loader.go
 SDK EnvironmentCredential selection:
 https://github.com/Azure/azure-sdk-for-go/blob/sdk/azidentity/v1.14.1/sdk/azidentity/default_azure_credential.go
-License: MIT, with dependency notices retained in upstream/NOTICE.md.
+License: MIT, with dependency notices retained in upstream\NOTICE.md.
 
 Validation limits
 Local fixture tests can verify arguments, credential isolation, JSON mapping,

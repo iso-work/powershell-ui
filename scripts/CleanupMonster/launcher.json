@@ -58,5 +58,30 @@
     "repository": "https://github.com/EvotecIT/CleanupMonster",
     "commit": "52e339e7f31a74736feb0daf664fd8d808150446",
     "copiedUtc": "2026-10-12T18:53:14.3819831Z"
+  },
+  "displayName": "AD computer activity",
+  "guide": {
+    "outcomes": [
+      "Computer names, identifiers, activity timestamps and an explanation for each assessment.",
+      "A count of recent, unknown, protected and review-candidate records.",
+      "Readable and structured report files with LLM processing guidance."
+    ],
+    "notes": [
+      "No computers are disabled, moved, deleted or modified.",
+      "An old timestamp is evidence to investigate; it does not prove a computer is unused.",
+      "This launcher runs a separate reporting adapter. The copied CleanupMonster cleanup scripts are reference material."
+    ],
+    "prerequisites": [
+      "A reachable Active Directory domain or domain controller, such as contoso.com or dc01.contoso.com.",
+      "The RSAT ActiveDirectory module, installed through your usual software process.",
+      "Directory read permission. The report uses your Windows identity unless you save a Directory account in Session credentials."
+    ],
+    "steps": [
+      "Open Parameters and enter the domain or domain controller name.",
+      "Optionally enter an organizational unit distinguished name to narrow the search.",
+      "Choose the activity review period in days. The default is 90.",
+      "Choose Run report, then review the explanations and timestamps in the results."
+    ],
+    "overview": "Read Active Directory computer records and highlight old activity evidence for manual investigation. The report explains why each computer is classified as recent, unknown, protected or a review candidate."
   }
 }

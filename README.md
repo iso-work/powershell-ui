@@ -10,15 +10,25 @@ Double-click Start-Launcher.cmd, or use PowerShell 7 on Windows:
 
 The launcher needs Windows and PowerShell 7. The CMD helper also finds the bundled Codex PowerShell runtime if PowerShell is absent from PATH. No execution-policy bypass is used.
 
+1. Choose a report in the library.
+2. Read **Start here** for its purpose, prerequisites, steps and expected output.
+3. Use **Session credentials** when the guide calls for a directory account or Azure application.
+4. Open **Parameters**, fill the required fields, and select **Run report**.
+5. Review **Report**, **Record table** and **JSON**. **Open report folder** opens the saved files.
+
+The UI uses Segoe UI fonts, formatted headings and bullet points. Parameter labels, required markers and explanations are separate. Panels wrap and scroll when the window is smaller; the run buttons and Microsoft sign-in status stay visible. **Technical details** retains the full directions file.
+
+Windows file paths use backslashes, for example C:\iso-psrepo\tools\azqr.exe. Web addresses use forward slashes, for example https://github.com/iso-work/powershell-ui. The executable field normalizes pasted paths and has a **Browse** button.
+
 ## Reports and prerequisites
 
 | Report | Purpose | What you provide |
 |---|---|---|
 | CleanupMonster: AD computer hygiene audit | Read computer activity timestamps, identify evidence for manual investigation, distinguish unknown/protected/DC accounts | Reachable AD domain/DC, optional OU search base, RSAT ActiveDirectory module, current identity or optional ActiveDirectory session credential |
 | IntuneManagement: read-only inventory | Read configuration/compliance policies, applications, settings catalog metadata, and optional safe device inventory | Tenant ID and public-client application ID, interactive Microsoft sign-in, Intune licensing and read permissions |
-| Azure Quick Review | Read Azure resource inventory and assessment findings for one subscription, optionally one resource group | Tenant/subscription IDs and an AzureServicePrincipal session credential (client ID + secret), application with Reader role, verified AZQR 4.2.0 binary |
+| Azure Quick Review | Read Azure resource inventory and assessment findings for one subscription, optionally one resource group | Tenant ID, subscription ID, an Azure application session credential (application ID and secret), application with Reader role, verified AZQR 4.2.0 binary |
 
-Each scripts/<tool>/directions.txt explains its purpose, exact inputs, permissions, output and limitations. Each launcher.json supplies the name, purpose and typed controls. Source copies live in each tool's upstream directory, with pinned provenance in UPSTREAM.json.
+Each scripts\<tool>\directions.txt explains its purpose, exact inputs, permissions, output and limitations. Each launcher.json supplies the name, purpose, formatted guide and typed controls. Source copies live in each tool's upstream directory, with pinned provenance in UPSTREAM.json.
 
 CleanupMonster and IntuneManagement upstream applications include write operations. They are retained as source references; this launcher exposes separate read-only adapters with narrower coverage. No cleanup, import, delete, policy changes, remediation or arbitrary upstream script execution is available from the UI. Intune uses fixed Microsoft Graph GET endpoints. AZQR uses the reviewed default scan, fixed flags, pinned executable checksums and an isolated plugin directory.
 
@@ -28,10 +38,10 @@ AD computer audit does not reproduce every CleanupMonster selection rule. Intune
 
 Use **Session credentials** to enter:
 
-- ActiveDirectory: DOMAIN\user (or UPN) plus password. Omit this credential to use the current Windows identity.
-- AzureServicePrincipal: application/client ID as username and client secret as password. The application should have only Azure Reader for the intended scope.
+- Directory account: DOMAIN\user (or UPN) plus password. Omit this credential to use the current Windows identity.
+- Azure application: application ID plus client secret value. The application should have only Azure Reader for the intended scope.
 
-Credentials are shared by the launcher session and can be reused across report runs. They are held as PSCredential/SecureString objects in memory. They are never written into PowerShell source, request files, report files, Git, the parent environment, or command-line arguments. Use **Clear credentials and tokens** to forget them earlier. Closing the launcher cancels active workers, terminates tracked native processes, disposes credential/token SecureStrings and clears the session dictionaries.
+Credentials are shared by the launcher session and can be reused across report runs. They are held as PSCredential/SecureString objects in memory. They are never written into PowerShell source, request files, report files, Git, the parent environment, or command-line arguments. Use **Clear saved session** to forget them earlier. Closing the launcher cancels active workers, terminates tracked native processes, disposes credential/token SecureStrings and clears the session dictionaries.
 
 Native Azure SDK and HTTPS requests must temporarily use plaintext credentials/tokens in process memory. The launcher clears references and zeroes temporary unmanaged BSTR buffers; .NET/OS memory cannot be promised to be forensically wiped. Azure-issued access tokens remain valid until their service-side expiry; forgetting them locally does not revoke them. Existing credentials/tokens owned by other applications are not changed.
 
@@ -47,7 +57,7 @@ Only public Microsoft Azure/Graph endpoints are supported by these adapters.
 
 ## AZQR local setup
 
-The verified executable is already installed in tools/azqr.exe in the original local delivery. Binaries are excluded from Git. On a new checkout run:
+The verified executable is already installed in tools\azqr.exe in the original local delivery. Binaries are excluded from Git. On a new checkout run:
 
     pwsh -File .\scripts\azqr\Install-Azqr.ps1
 
@@ -57,11 +67,11 @@ Install/enable RSAT and configure tenant applications/permissions outside this l
 
 ## Output and LLM review
 
-Default: reports/<UTC timestamp>-<run id>/report.json and report.md.
+Default: reports\<UTC timestamp>-<run id>\report.json and report.md.
 
 - Report tab: readable summary, limitations, LLM guidance and the first 200 records.
 - Record table: up to 5,000 rows with copying and column sorting; complete data is in JSON.
-- Structured data tab: full report JSON. Open report folder accesses the saved files.
+- JSON tab: full report JSON. Open report folder accesses the saved files.
 - JSON contains schema version, source, purpose, scope parameters, timing, status, summary, records and limitations.
 - Partial, failed and cancelled runs are labelled. They never establish that a system is healthy or that no objects exist.
 - AZQR also retains its native consolidated JSON locally.
@@ -83,6 +93,10 @@ infrastructure/upstream-sources.json pins the three upstream commits. The GitHub
 Upstream nested .github workflows are reference files and are not active repository workflows. Git submodule entries remain uninitialized, matching a normal non-recursive source checkout. CleanupMonster provides no LICENSE in this pinned snapshot; its copyright headers are preserved. IntuneManagement and AZQR retain their upstream licenses.
 
 Reports and tools are ignored by Git. Do not commit credentials or output reports.
+
+## Microsoft 365 and Exchange
+
+See [Microsoft 365 report options](docs/Microsoft365-report-options.md) for the researched recommendation: Monkey365 for broad settings and security findings, paired with Microsoft's read-only Graph APIs for the actual Secure Score and control profiles. This is a recommendation; those collectors are not installed or exposed in this three-report launcher.
 
 ## Verification and extension
 
