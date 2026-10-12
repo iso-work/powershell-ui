@@ -12,7 +12,7 @@ foreach($file in $files) {
     Assert ($errors.Count -eq 0) "Syntax errors: $($file.FullName): $errors"
 }
 $catalog=@(Get-ScriptCatalog $root)
-Assert ($catalog.Count -eq 3) 'Expected three manifest-only reporting adapters.'
+Assert ($catalog.Count -eq 4) 'Expected four manifest-only reporting adapters.'
 foreach($item in $catalog) { Assert ($item.Errors.Count -eq 0) "Adapter integrity: $($item.Name): $($item.Errors)" }
 Assert (@($catalog | Where-Object Path -match 'upstream').Count -eq 0) 'Upstream management scripts must not be exposed.'
 $session=New-LauncherSession
@@ -75,5 +75,6 @@ try {
 & (Join-Path $root 'scripts/CleanupMonster/Test-Adapter.ps1')
 & (Join-Path $root 'scripts/IntuneManagement/Test-Adapter.ps1')
 & (Join-Path $root 'scripts/azqr/tests/Test-Wrapper.ps1')
+& (Join-Path $root 'scripts/RebootHistory/Test-Adapter.ps1')
 'PASS: launcher syntax, manifest-only discovery, integrity checks, redaction, session cleanup, report roundtrip and partial/failure handling. No live target queries were made.'
 

@@ -95,7 +95,12 @@ $card=[Windows.Forms.TableLayoutPanel]::new(); $card.ColumnCount=1; $card.RowCou
 $title=[Windows.Forms.Label]::new(); $title.AutoSize=$true; $title.Font=[Drawing.Font]::new('Segoe UI',11,[Drawing.FontStyle]::Bold); $title.ForeColor=$script:ink; $title.Text=$Parameter.label+$(if($Parameter.required){'  ·  Required'}else{'  ·  Optional'})
 $help=[Windows.Forms.Label]::new(); $help.AutoSize=$true; $help.ForeColor=$script:muted; $help.Font=[Drawing.Font]::new('Segoe UI',10); $help.Margin=[Windows.Forms.Padding]::new(0,4,0,4); $help.Text=[string]$Parameter.help
 if($Parameter.type -eq 'boolean') { $control=[Windows.Forms.CheckBox]::new(); $control.AutoSize=$true; $control.Text='Include this in the report'; $control.Checked=[bool]$Parameter.default }
-elseif($Parameter.type -eq 'integer') { $control=[Windows.Forms.NumericUpDown]::new(); $control.Minimum=1; $control.Maximum=36500; $control.Value=[decimal]$Parameter.default; $control.Width=160 }
+elseif($Parameter.type -eq 'integer') {
+    $control=[Windows.Forms.NumericUpDown]::new()
+    $control.Minimum=if($Parameter.ContainsKey('minimum')){[decimal]$Parameter.minimum}else{1}
+    $control.Maximum=if($Parameter.ContainsKey('maximum')){[decimal]$Parameter.maximum}else{36500}
+    $control.Value=[decimal]$Parameter.default; $control.Width=160
+}
 else {
 $control=[Windows.Forms.TextBox]::new(); $control.Dock='Fill'; $control.Margin=[Windows.Forms.Padding]::new(0,6,0,0)
 if($Parameter.ContainsKey('placeholder')){$control.PlaceholderText=$Parameter.placeholder}
@@ -153,7 +158,7 @@ function Show-CredentialDialog {
             $usernameLabel.Text='Application ID'; $username.PlaceholderText='Application (client) ID from Microsoft Entra ID'
             $passwordLabel.Text='Client secret'; $password.PlaceholderText='Secret value, not the secret ID'
         } else {
-            $hint.Text='For AD computer activity. Leave this unset to use your current Windows identity. Intune uses Microsoft sign-in instead.'
+            $hint.Text='For AD computer activity and remote Reboot history. Leave this unset to use your Windows identity. Local reboot reports always use your Windows identity.'
             $usernameLabel.Text='Directory username'; $username.PlaceholderText='DOMAIN\user or user@domain.example'
             $passwordLabel.Text='Password'; $password.PlaceholderText='Directory account password'
         }
@@ -205,14 +210,31 @@ function Show-ReportResult {
             $data=$jsonText.Text | ConvertFrom-Json -AsHashtable
             $table=[Data.DataTable]::new()
             $rows=@($data.records | Select-Object -First 5000)
-            foreach($record in $rows) { foreach($key in $record.Keys) { if(-not $table.Columns.Contains($key)) { [void]$table.Columns.Add($key,[string]) } } }
+            $reportCatalogItem=$script:catalog | Where-Object { $_.Manifest.id -eq $data.tool } | Select-Object -First 1
+            $primaryColumns=@()
+            if($reportCatalogItem -and $reportCatalogItem.Manifest.ContainsKey('output') -and $reportCatalogItem.Manifest.output.ContainsKey('primaryColumns')) { $primaryColumns=@($reportCatalogItem.Manifest.output.primaryColumns | Select-Object -Unique) }
+            if($primaryColumns.Count) {
+                foreach($key in $primaryColumns) { [void]$table.Columns.Add([string]$key,[string]) }
+            } else {
+                foreach($record in $rows) { foreach($key in $record.Keys) { if(-not $table.Columns.Contains($key)) { [void]$table.Columns.Add($key,[string]) } } }
+            }
             foreach($record in $rows) {
                 $row=$table.NewRow()
-                foreach($key in $record.Keys) { $value=$record[$key]; $row[$key]=if($null -eq $value) { '' } elseif($value -is [string] -or $value -is [ValueType]) { [string]$value } else { ConvertTo-Json -InputObject $value -Depth 50 -Compress } }
+                foreach($column in $table.Columns) {
+                    $key=$column.ColumnName; $value=$record[$key]
+                    $row[$key]=if($null -eq $value) { '' } elseif($value -is [DateTime] -or $value -is [DateTimeOffset]) { $value.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ') } elseif($value -is [string] -or $value -is [ValueType]) { [string]$value } else { ConvertTo-Json -InputObject $value -Depth 50 -Compress }
+                }
                 $table.Rows.Add($row)
             }
             $grid.DataSource=$table
+            if($reportCatalogItem -and $reportCatalogItem.Manifest.ContainsKey('output') -and $reportCatalogItem.Manifest.output.ContainsKey('columnLabels')) {
+                foreach($column in $grid.Columns) {
+                    $label=$reportCatalogItem.Manifest.output.columnLabels[$column.Name]
+                    if($label) { $column.HeaderText=$label }
+                }
+            }
             $gridTab.Text="Record table ($($rows.Count))"
+            $tabs.SelectedTab=if($data.status -in @('Completed','Partial') -and $reportCatalogItem -and $reportCatalogItem.Manifest.ContainsKey('output') -and $reportCatalogItem.Manifest.output.ContainsKey('defaultView') -and $reportCatalogItem.Manifest.output.defaultView -eq 'table') { $gridTab } else { $resultTab }
 
 }
 $timer=[Windows.Forms.Timer]::new(); $timer.Interval=300
@@ -234,7 +256,7 @@ $timer.Add_Tick({
         if($script:lastReport) {
             Show-ReportResult
             $status.AppendText([Environment]::NewLine+"$($script:lastReport.Report.status): $($script:lastReport.JsonPath)")
-            $open.Enabled=$true; $tabs.SelectedTab=$resultTab
+            $open.Enabled=$true
         } else { $status.AppendText([Environment]::NewLine+'No completed report was returned. Collection failed or was cancelled.') }
     } catch {
         $status.AppendText([Environment]::NewLine+'Collection stopped or failed before report creation. Do not interpret missing results as healthy.')
@@ -293,7 +315,7 @@ $form.Add_FormClosing({Stop-Report})
 Refresh-Catalog
 try {
     if($VerifyUi) {
-        if($list.Items.Count -ne 3) { throw 'Expected three reports.' }
+        if($list.Items.Count -ne 4) { throw 'Expected four reports.' }
         for($index=0;$index -lt $list.Items.Count;$index++) {
             $list.SelectedIndex=$index
             if(-not $run.Enabled -or $script:inputs.Count -eq 0) { throw 'Manifest parameter controls or integrity gate failed.' }
@@ -302,6 +324,7 @@ try {
                 $editor=$script:inputs[$parameter.name]
                 if($parameter.type -eq 'file' -and ($editor.Text -match '/' -or -not [IO.Path]::IsPathFullyQualified($editor.Text))) { throw 'Executable default must be a consistent absolute Windows path.' }
                 if($parameter.type -eq 'integer' -and $editor -isnot [Windows.Forms.NumericUpDown]) { throw 'Integer parameter needs a numeric editor.' }
+                if($parameter.ContainsKey('maximum') -and $editor.Maximum -ne $parameter.maximum) { throw 'Declared parameter maximum was not applied.' }
             }
         }
         $displayFixture=Join-Path ([IO.Path]::GetTempPath()) ('launcher-display-'+[guid]::NewGuid())
@@ -312,6 +335,16 @@ try {
             $script:lastReport=Write-LauncherReport $fixtureManifest @{} $fixtureResult 'Completed' $displayFixture ([DateTime]::UtcNow)
             Show-ReportResult
             if($grid.DataSource.Rows.Count -ne 1 -or $reportText.Text -notmatch 'Synthetic fixture' -or $jsonText.Text -notmatch 'display-1') { throw 'Report display failed.' }
+            $historyManifest=($script:catalog | Where-Object { $_.Manifest.id -eq 'windows-reboot-history' }).Manifest
+            $historyResult=[pscustomobject]@{
+                Summary='Synthetic reboot table';Records=@([pscustomobject]@{
+                    StartedUtc='2026-01-01T12:00:00Z';Classification='Uncertain';ErrorStatus='Unknown or incomplete';NearbyErrorCount=0
+                    WindowsReason='Fixture';RequestedBy='';Id='history-display-fixture';Evidence=@(@{RecordId=7;EventId=12})
+                });Limitations=@('Synthetic, not machine data.')
+            }
+            $script:lastReport=Write-LauncherReport $historyManifest @{} $historyResult 'Partial' $displayFixture ([DateTime]::UtcNow)
+            Show-ReportResult
+            if($grid.Columns.Count -ne 6 -or $grid.Columns.Contains('Evidence') -or $grid.Columns['StartedUtc'].HeaderText -ne 'Started (UTC)' -or $grid.DataSource.Rows[0]['StartedUtc'] -notmatch '^2026-01-01T12:00:00.*Z$' -or $tabs.SelectedTab -ne $gridTab -or $jsonText.Text -notmatch 'history-display-fixture') { throw 'Compact reboot table, UTC timestamps, automatic view or full JSON evidence failed.' }
         } finally {
             Remove-Item -LiteralPath (Join-Path $displayFixture 'report.json'),(Join-Path $displayFixture 'report.md') -Force
             Remove-Item -LiteralPath $displayFixture
@@ -324,8 +357,12 @@ try {
             $gridTab.Text='Record table'
             $form.ShowInTaskbar=$false; $form.StartPosition='Manual'; $form.Location=[Drawing.Point]::new(-30000,-30000); $form.Opacity=0
             $form.Show(); [Windows.Forms.Application]::DoEvents()
-            foreach($view in @('guide','parameters','compact')) {
-                $tabs.SelectedTab=if($view -eq 'guide'){$usageTab}else{$paramTab}
+            foreach($view in @('guide','parameters','compact','reboot-parameters','reboot-table')) {
+                if($view -like 'reboot-*') {
+                    $form.Size=[Drawing.Size]::new(1320,930)
+                    $list.SelectedIndex=@($list.Items | ForEach-Object {$_.Manifest.id}).IndexOf('windows-reboot-history')
+                }
+                $tabs.SelectedTab=if($view -eq 'guide'){$usageTab}elseif($view -eq 'reboot-table'){$gridTab}else{$paramTab}
                 if($view -eq 'compact') { $form.Size=$form.MinimumSize }
                 $null=$form.Handle
                 $form.PerformLayout(); $rootLayout.PerformLayout(); $split.PerformLayout(); $content.PerformLayout(); $tabs.PerformLayout(); $fields.PerformLayout()
@@ -339,7 +376,7 @@ try {
             Show-CredentialDialog -PreviewFile (Join-Path $PreviewPath 'launcher-credentials.png')
             $form.Hide()
         }
-        'PASS: three manifests, formatted guides with bullets, typed parameter controls, Windows paths, integrity gate, readable report, record table and JSON initialize in the Windows UI.'
+        'PASS: four manifests, formatted guides with bullets, bounded parameter controls, Windows paths, integrity gate, readable report, record table and JSON initialize in the Windows UI.'
     } else { [void]$form.ShowDialog() }
 } finally {
     try {

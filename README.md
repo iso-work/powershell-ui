@@ -1,6 +1,6 @@
 # Read-only PowerShell infrastructure reports
 
-Windows desktop launcher for three reviewed reporting workflows. Select a report, read its purpose and directions, enter scope parameters, and run it. Results appear as a readable report, a record table, and structured JSON. Every run writes local report.json and report.md, including explicit instructions for an LLM.
+Windows desktop launcher for four reviewed reporting workflows. Select a report, read its purpose and directions, enter scope parameters, and run it. Results appear as a readable report, a record table, and structured JSON. Every run writes local report.json and report.md, including explicit instructions for an LLM.
 
 ## Launch
 
@@ -27,6 +27,7 @@ Windows file paths use backslashes, for example C:\iso-psrepo\tools\azqr.exe. We
 | CleanupMonster: AD computer hygiene audit | Read computer activity timestamps, identify evidence for manual investigation, distinguish unknown/protected/DC accounts | Reachable AD domain/DC, optional OU search base, RSAT ActiveDirectory module, current identity or optional ActiveDirectory session credential |
 | IntuneManagement: read-only inventory | Read configuration/compliance policies, applications, settings catalog metadata, and optional safe device inventory | Tenant ID and public-client application ID, interactive Microsoft sign-in, Intune licensing and read permissions |
 | Azure Quick Review | Read Azure resource inventory and assessment findings for one subscription, optionally one resource group | Tenant ID, subscription ID, an Azure application session credential (application ID and secret), application with Reader role, verified AZQR 4.2.0 binary |
+| Reboot history | Show Windows starts, Intentional/Unintentional/Uncertain classifications and nearby System-log errors | Localhost or one remote Windows machine; System event log read permission; optional Directory account session credential for remote reads |
 
 Each scripts\<tool>\directions.txt explains its purpose, exact inputs, permissions, output and limitations. Each launcher.json supplies the name, purpose, formatted guide and typed controls. Source copies live in each tool's upstream directory, with pinned provenance in UPSTREAM.json.
 
@@ -34,11 +35,13 @@ CleanupMonster and IntuneManagement upstream applications include write operatio
 
 AD computer audit does not reproduce every CleanupMonster selection rule. Intune inventory does not include assignments, effective policy, settings catalog settings, scripts, or every upstream object type. Directions and report limitations state this explicitly.
 
+Reboot history defaults to 30 days and the latest 50 starts. It opens a compact history table automatically and retains complete evidence in JSON. It checks Critical/Error events within 10 minutes before and after each start, adjustable to 1-60 minutes. Only retained System events are read; a missing request remains Uncertain, conflicting evidence is not forced into a binary classification, and nearby errors are not proof of a reboot's cause. Starts include power-on after shutdown; fallback service starts are explicitly unconfirmed. It never restarts a machine or changes its event logging, services, firewall or remote-access settings. See scripts\RebootHistory\directions.txt for the classification rules and collection limits.
+
 ## Credentials and Microsoft sign-in
 
 Use **Session credentials** to enter:
 
-- Directory account: DOMAIN\user (or UPN) plus password. Omit this credential to use the current Windows identity.
+- Directory account: DOMAIN\user (or UPN) plus password, for AD queries or remote reboot history. Omit this credential to use the current Windows identity. Local reboot history always uses the current Windows identity.
 - Azure application: application ID plus client secret value. The application should have only Azure Reader for the intended scope.
 
 Credentials are shared by the launcher session and can be reused across report runs. They are held as PSCredential/SecureString objects in memory. They are never written into PowerShell source, request files, report files, Git, the parent environment, or command-line arguments. Use **Clear saved session** to forget them earlier. Closing the launcher cancels active workers, terminates tracked native processes, disposes credential/token SecureStrings and clears the session dictionaries.
@@ -70,7 +73,7 @@ Install/enable RSAT and configure tenant applications/permissions outside this l
 Default: reports\<UTC timestamp>-<run id>\report.json and report.md.
 
 - Report tab: readable summary, limitations, LLM guidance and the first 200 records.
-- Record table: up to 5,000 rows with copying and column sorting; complete data is in JSON.
+- Record table: up to 5,000 rows with copying and column sorting; manifests can select compact primary columns. Complete returned records are in JSON. Reboot history returns at most the selected number of rows (default 50, maximum 500).
 - JSON tab: full report JSON. Open report folder accesses the saved files.
 - JSON contains schema version, source, purpose, scope parameters, timing, status, summary, records and limitations.
 - Partial, failed and cancelled runs are labelled. They never establish that a system is healthy or that no objects exist.
@@ -96,7 +99,7 @@ Reports and tools are ignored by Git. Do not commit credentials or output report
 
 ## Microsoft 365 and Exchange
 
-See [Microsoft 365 report options](docs/Microsoft365-report-options.md) for the researched recommendation: Monkey365 for broad settings and security findings, paired with Microsoft's read-only Graph APIs for the actual Secure Score and control profiles. This is a recommendation; those collectors are not installed or exposed in this three-report launcher.
+See [Microsoft 365 report options](docs/Microsoft365-report-options.md) for the researched recommendation: Monkey365 for broad settings and security findings, paired with Microsoft's read-only Graph APIs for the actual Secure Score and control profiles. This is a recommendation; those collectors are not installed or exposed in this launcher.
 
 ## Verification and extension
 
