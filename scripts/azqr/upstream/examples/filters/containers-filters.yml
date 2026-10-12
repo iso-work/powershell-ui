@@ -1,0 +1,16 @@
+# Including only Azure Kubernetes Service (aks), Container Apps (ca), Container App Environments (cae), Container Instances (ci) and Container Registry (cr) resources.
+azqr:
+  include:
+    resourceTypes:
+      - aks
+      - ca
+      - cae
+      - ci
+      - cr
+    # All include tags must match. Tag keys are case-insensitive; values are exact.
+    tags:
+      env: prod
+  exclude:
+    # Any matching exclude tag removes the resource, even when include tags match.
+    tags:
+      lifecycle: retired

@@ -1,0 +1,15 @@
+.vs/
+.vscode/
+.git/
+/*.Log
+/*.Lo_
+/*.csv
+/*.zip
+/*.new
+/*.old
+/Extensions/*.zip
+Extensions_dev/
+.gitignore
+CloudAPIPowerShellManagement.log
+AGENTS.md
+CLAUDE.md

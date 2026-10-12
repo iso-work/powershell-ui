@@ -1,0 +1,362 @@
+name: "azqr-build"
+
+on:
+  workflow_dispatch:
+  push:
+    paths-ignore:
+      - docs/**
+    branches:
+      - main
+      - release-*
+      - feature-*
+      - fix-*
+    tags:
+      - v*
+  pull_request:
+    paths-ignore:
+      - docs/**
+    branches:
+      - main
+      - release-*
+
+permissions: read-all
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          submodules: "recursive"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Run tests
+        run: make test
+
+      - name: Check third-party licenses
+        run: |
+          go install github.com/google/go-licenses/v2@v2.0.1
+          make notice
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.txt
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+  calculate-version:
+    name: Calculate Version
+    runs-on: ubuntu-latest
+    needs: test
+    outputs:
+      version: ${{ steps.calculate_version.outputs.version }}
+    steps:
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Calculate Version
+        id: calculate_version
+        run: |
+          echo "version=$(git describe --tags)" >> $GITHUB_OUTPUT
+
+  build-linux:
+    name: Build Linux Binaries
+    runs-on: ubuntu-latest
+    needs: calculate-version
+    permissions:
+      contents: read
+    steps:
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          submodules: "recursive"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Build Linux AMD64
+        run: make
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: 0
+          PRODUCT_VERSION: ${{ needs.calculate-version.outputs.version }}
+
+      - name: Build Linux ARM64
+        run: make
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: 0
+          PRODUCT_VERSION: ${{ needs.calculate-version.outputs.version }}
+
+      - name: tarball Linux binaries
+        run: |
+          tar -czf linux-azqr.tar.gz bin/linux_*
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-binaries
+          path: linux-azqr.tar.gz
+
+  build-windows:
+    name: Build Windows Binaries
+    runs-on: windows-latest
+    needs: calculate-version
+    permissions:
+      contents: read
+    steps:
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          submodules: "recursive"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Build Windows AMD64
+        run: make
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: 0
+          PRODUCT_VERSION: ${{ needs.calculate-version.outputs.version }}
+
+      - name: Build Windows ARM64
+        run: make
+        env:
+          GOOS: windows
+          GOARCH: arm64
+          CGO_ENABLED: 0
+          PRODUCT_VERSION: ${{ needs.calculate-version.outputs.version }}
+
+      - name: Copy README and LICENSE
+        run: |
+          copy README.md bin\windows_amd64\README.md
+          copy LICENSE bin\windows_amd64\LICENSE
+          copy README.md bin\windows_arm64\README.md
+          copy LICENSE bin\windows_arm64\LICENSE
+
+      - name: tarball windows binaries
+        run: |
+          tar -czf windows-azqr.tar.gz bin/windows_*
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-binaries
+          path: windows-azqr.tar.gz
+
+  build-macos:
+    name: Build macOS Binaries
+    runs-on: macos-latest
+    needs: calculate-version
+    permissions:
+      contents: read
+    steps:
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          submodules: "recursive"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Build macOS AMD64
+        run: make
+        env:
+          GOOS: darwin
+          GOARCH: amd64
+          CGO_ENABLED: 1
+          PRODUCT_VERSION: ${{ needs.calculate-version.outputs.version }}
+
+      - name: Build macOS ARM64
+        run: make
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+          CGO_ENABLED: 1
+          PRODUCT_VERSION: ${{ needs.calculate-version.outputs.version }}
+
+      - name: tarball macos binaries
+        run: |
+          tar -czf macos-azqr.tar.gz bin/darwin_*
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-binaries
+          path: macos-azqr.tar.gz
+
+  release:
+    name: Create Release
+    needs: [calculate-version, build-linux, build-windows, build-macos]
+    if: github.event_name != 'pull_request' && startswith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Detect preview version
+        id: detect_preview
+        run: |
+          VERSION="${{ needs.calculate-version.outputs.version }}"
+          if [[ $VERSION =~ (preview|alpha|beta|rc|dev) ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          submodules: "recursive"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: bin
+
+      - name: untar binaries
+        run: |
+          tar -xzf bin/linux-binaries/linux-azqr.tar.gz
+          tar -xzf bin/macos-binaries/macos-azqr.tar.gz
+          tar -xzf bin/windows-binaries/windows-azqr.tar.gz
+
+      - name: Move binaries to correct locations
+        run: |
+          mkdir -p bin/linux_amd64 bin/linux_arm64 bin/linux_armv7 \
+                 bin/darwin_amd64 bin/darwin_arm64 \
+                 bin/windows_amd64 bin/windows_arm64
+          rm -rf bin/linux-binaries bin/macos-binaries bin/windows-binaries
+
+      - name: Zip
+        uses: montudor/action-zip@a8e75c9faefcd80fac3baf53ef40b9b119d5b702 # v1
+        with:
+          args: zip -qq -r azqr.zip bin
+
+      - name: Zip (win-amd64)
+        uses: montudor/action-zip@a8e75c9faefcd80fac3baf53ef40b9b119d5b702 # v1
+        with:
+          args: zip -qq azqr-win-amd64.zip bin/windows_amd64/azqr.exe bin/windows_amd64/README.md bin/windows_amd64/LICENSE 
+
+      - name: Zip (win-arm64)
+        uses: montudor/action-zip@a8e75c9faefcd80fac3baf53ef40b9b119d5b702 # v1
+        with:
+          args: zip -qq azqr-win-arm64.zip bin/windows_arm64/azqr.exe bin/windows_arm64/README.md bin/windows_arm64/LICENSE
+
+      - name: Zip (darwin-amd64)
+        uses: montudor/action-zip@a8e75c9faefcd80fac3baf53ef40b9b119d5b702 # v1
+        with:
+          args: zip -qq azqr-darwin-amd64.zip bin/darwin_amd64/azqr
+
+      - name: Zip (darwin-arm64)
+        uses: montudor/action-zip@a8e75c9faefcd80fac3baf53ef40b9b119d5b702 # v1
+        with:
+          args: zip -qq azqr-darwin-arm64.zip bin/darwin_arm64/azqr
+
+      - name: Zip (linux-amd64)
+        uses: montudor/action-zip@a8e75c9faefcd80fac3baf53ef40b9b119d5b702 # v1
+        with:
+          args: zip -qq azqr-linux-amd64.zip bin/linux_amd64/azqr
+
+      - name: Zip (linux-arm64)
+        uses: montudor/action-zip@a8e75c9faefcd80fac3baf53ef40b9b119d5b702 # v1
+        with:
+          args: zip -qq azqr-linux-arm64.zip bin/linux_arm64/azqr
+
+      - name: Generate SBOM (CycloneDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: azqr.cdx.json
+
+      - name: Generate SBOM (SPDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: .
+          format: spdx-json
+          output-file: azqr.spdx.json
+
+      - name: Create sha256 Checksums
+        run: |
+          sha256sum azqr.zip > azqr.zip.sha256
+          sha256sum azqr-win-amd64.zip > azqr-win-amd64.zip.sha256
+          sha256sum azqr-win-arm64.zip > azqr-win-arm64.zip.sha256
+          sha256sum azqr-darwin-amd64.zip > azqr-darwin-amd64.zip.sha256
+          sha256sum azqr-darwin-arm64.zip > azqr-darwin-arm64.zip.sha256
+          sha256sum azqr-linux-amd64.zip > azqr-linux-amd64.zip.sha256
+          sha256sum azqr-linux-arm64.zip > azqr-linux-arm64.zip.sha256
+          sha256sum azqr.cdx.json > azqr.cdx.json.sha256
+          sha256sum azqr.spdx.json > azqr.spdx.json.sha256
+
+      - name: Create azqr Release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          name: ${{ needs.calculate-version.outputs.version }}
+          body: ""
+          draft: false
+          prerelease: ${{ steps.detect_preview.outputs.is_prerelease }}
+          files: |
+            azqr.zip
+            azqr-win-amd64.zip
+            azqr-win-arm64.zip
+            azqr-darwin-amd64.zip
+            azqr-darwin-arm64.zip
+            azqr-linux-amd64.zip
+            azqr-linux-arm64.zip
+            azqr.zip.sha256
+            azqr-win-amd64.zip.sha256
+            azqr-win-arm64.zip.sha256
+            azqr-darwin-amd64.zip.sha256
+            azqr-darwin-arm64.zip.sha256
+            azqr-linux-amd64.zip.sha256
+            azqr-linux-arm64.zip.sha256
+            azqr.cdx.json
+            azqr.spdx.json
+            azqr.cdx.json.sha256
+            azqr.spdx.json.sha256
+
+  bump-winget:
+    name: bump-winget
+    needs: [calculate-version, release]
+    permissions:
+      contents: write
+    if: github.event_name != 'pull_request' && startswith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Bump Winget
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
+        with:
+          event-type: bump-winget
+          client-payload: '{"version": "${{ needs.calculate-version.outputs.version }}"}'

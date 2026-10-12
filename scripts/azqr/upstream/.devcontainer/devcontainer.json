@@ -1,0 +1,45 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/go
+{
+	"name": "Go",
+	"image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+	"customizations": {
+		"vscode": {
+			"settings": {
+				"go.useLanguageServer": true,
+				"go.lintTool": "golangci-lint",
+				"go.lintFlags": [
+					"--fast"
+				],
+				"scm.defaultViewMode": "tree",
+				"editor.formatOnSave": true,
+				"editor.codeActionsOnSave": {
+					"source.organizeImports": "explicit"
+				},
+				"githubPullRequests.createOnPublishBranch": "never"
+			},
+			"extensions": [
+				"golang.go",
+				"GitHub.copilot",
+				"GitHub.copilot-chat",
+				"mhutchie.git-graph",
+				"ms-azuretools.vscode-docker",
+				"hashicorp.terraform"
+			]
+		}
+	},
+	"features": {
+		"ghcr.io/devcontainers/features/azure-cli:1": {
+			"installBicep": false
+		},
+		"ghcr.io/devcontainers/features/go:1": {
+			"version": "1.26"
+		},
+		"ghcr.io/guiyomh/features/golangci-lint:0": {
+			"version": "latest"
+		},
+		"ghcr.io/devcontainers/features/docker-in-docker:2": {},
+		"ghcr.io/devcontainers/features/terraform:1": {}
+	},
+	"postCreateCommand": "go mod download && git submodule init && git submodule update"
+}
