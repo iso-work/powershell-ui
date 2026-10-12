@@ -1,3 +1,9 @@
 *.log
 *.tmp
 .vscode/
+reports/
+tools/
+work/
+*.credential
+*.pfx
+

@@ -1,0 +1,40 @@
+{
+  "id": "intune-readonly",
+  "name": "IntuneManagement - Read-only inventory",
+  "purpose": "Read Intune configuration profiles, compliance policies, applications and settings catalog policy metadata. Optionally inventory managed devices. Display and export a sanitized report without changing tenant objects.",
+  "entryPoint": "Invoke-Report.ps1",
+  "readOnly": true,
+  "auth": "Graph",
+  "parameters": [
+    {
+      "name": "TenantId",
+      "label": "Tenant ID or verified tenant domain",
+      "type": "text",
+      "required": true,
+      "default": "",
+      "help": "Microsoft Entra tenant GUID or verified domain, for example contoso.onmicrosoft.com. Used by the launcher's device-code sign-in."
+    },
+    {
+      "name": "ClientId",
+      "label": "Public client application ID",
+      "type": "text",
+      "required": true,
+      "default": "",
+      "help": "Application ID of an existing public-client app registration configured for device-code authentication and the read-only delegated Graph permissions described in directions.txt."
+    },
+    {
+      "name": "IncludeDevices",
+      "label": "Include managed device inventory",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "help": "Also requests DeviceManagementManagedDevices.Read.All and reads a restricted set of device inventory fields. Device names are included; recovery/bypass codes and user contact details are excluded."
+    }
+  ],
+  "source": {
+    "format": "complete working tree snapshot; .git excluded",
+    "repository": "https://github.com/Micke-K/IntuneManagement",
+    "commit": "1bd21513584c7decbe574fcaca6668c3a54e0603",
+    "copiedUtc": "2026-10-12T18:53:16.9716873Z"
+  }
+}

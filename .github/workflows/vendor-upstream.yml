@@ -1,0 +1,52 @@
+name: Copy pinned upstream source snapshots
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - infrastructure/upstream-sources.json
+      - infrastructure/Sync-Upstream.ps1
+      - .github/workflows/vendor-upstream.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pinned-upstream-source-copy
+  cancel-in-progress: false
+
+jobs:
+  copy-sources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the launcher repository
+        # Official actions/checkout v4.2.2, pinned to its immutable commit.
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 1
+          ref: main
+          persist-credentials: true
+
+      - name: Validate and copy approved public source archives
+        shell: pwsh
+        run: ./infrastructure/Sync-Upstream.ps1 -RepositoryRoot $env:GITHUB_WORKSPACE
+
+      - name: Commit only the three source copies and their provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --force -- \
+            scripts/CleanupMonster/upstream scripts/CleanupMonster/UPSTREAM.json \
+            scripts/IntuneManagement/upstream scripts/IntuneManagement/UPSTREAM.json \
+            scripts/azqr/upstream scripts/azqr/UPSTREAM.json
+          if git diff --cached --quiet; then
+            echo 'All three pinned source copies already match.'
+            exit 0
+          fi
+          git status --short
+          git commit -m 'Vendor the three verified upstream source snapshots'
+          git push origin HEAD:main

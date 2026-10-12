@@ -1,0 +1,48 @@
+{
+  "id": "azqr-readonly",
+  "name": "Azure Quick Review: read-only Azure assessment",
+  "purpose": "Read Azure resource inventory, resiliency recommendations, Advisor findings, Defender plan status, and diagnostics configuration for one subscription and an optional resource group. Display structured findings and generate a report for human and LLM review; no remediation is performed.",
+  "entryPoint": "Invoke-Report.ps1",
+  "readOnly": true,
+  "credentialKey": "AzureServicePrincipal",
+  "parameters": [
+    {
+      "name": "TenantId",
+      "label": "Microsoft Entra tenant ID",
+      "type": "text",
+      "required": true,
+      "default": "",
+      "help": "Tenant ID GUID for the AzureServicePrincipal application. Public Azure only."
+    },
+    {
+      "name": "SubscriptionId",
+      "label": "Azure subscription ID",
+      "type": "text",
+      "required": true,
+      "default": "",
+      "help": "One subscription ID GUID. Grant the application Reader at this subscription; no write role is needed."
+    },
+    {
+      "name": "ResourceGroup",
+      "label": "Resource group (optional)",
+      "type": "text",
+      "required": false,
+      "default": "",
+      "help": "Leave blank for the subscription, or enter one resource-group name to narrow the read-only scan."
+    },
+    {
+      "name": "AzqrPath",
+      "label": "Trusted azqr.exe version 4.2.0 path",
+      "type": "text",
+      "required": true,
+      "default": "{LauncherRoot}/tools/azqr.exe",
+      "help": "Full path to the official version 4.2.0 Windows binary. The optional Install-Azqr.ps1 local setup downloads and checksum-verifies the reviewed binary; see directions.txt."
+    }
+  ],
+  "source": {
+    "format": "complete working tree snapshot; .git excluded",
+    "repository": "https://github.com/Azure/azqr",
+    "commit": "3ccbd659d78a9cec6d60f7b43e5bc093f453ed25",
+    "copiedUtc": "2026-10-12T18:53:20.5065983Z"
+  }
+}
