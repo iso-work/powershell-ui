@@ -12,9 +12,11 @@ foreach($file in $files) {
     Assert ($errors.Count -eq 0) "Syntax errors: $($file.FullName): $errors"
 }
 $catalog=@(Get-ScriptCatalog $root)
-Assert ($catalog.Count -eq 4) 'Expected four manifest-only reporting adapters.'
+Assert ($catalog.Count -eq 5) 'Expected four reports and one reviewed Halo extension preparation tool.'
 foreach($item in $catalog) { Assert ($item.Errors.Count -eq 0) "Adapter integrity: $($item.Name): $($item.Errors)" }
 Assert (@($catalog | Where-Object Path -match 'upstream').Count -eq 0) 'Upstream management scripts must not be exposed.'
+Assert (@($catalog | Where-Object { $_.Manifest.readOnly -ne $true }).Count -eq 1) 'Only the approved Halo browser extension may be write-capable.'
+Assert (($catalog | Where-Object { $_.Manifest.readOnly -ne $true }).Manifest.id -eq 'halo-appointment-manager') 'The write-capable exception must be scoped to Halo preparation.'
 $session=New-LauncherSession
 Assert ((Resolve-LauncherTenant 'Contoso.onmicrosoft.com') -eq 'contoso.onmicrosoft.com') 'Verified tenant-domain input failed.'
 $tenantBlocked=$false
@@ -65,6 +67,16 @@ try {
     $failed=Invoke-LauncherAdapter $manifest @{} $context $entry $fixture $hash
     $failedJson=Get-Content -LiteralPath $failed.JsonPath -Raw
     Assert ($failed.Report.status -eq 'Failed' -and $failedJson -notmatch 'sensitive-error-password') 'Failure status or safe error handling failed.'
+    $extensionManifest=@{id='halo-appointment-manager';name='Halo package fixture';purpose='Local extension preparation';source='test';kind='browser-extension';readOnly=$false;output=@{llmInstructions='Preparation does not complete appointments.'}}
+    $prepared=Write-LauncherReport $extensionManifest @{} $result 'Completed' $fixture ([DateTime]::UtcNow)
+    $preparedData=Get-Content -LiteralPath $prepared.JsonPath -Raw | ConvertFrom-Json
+    Assert (-not $preparedData.readOnly -and $preparedData.operation -eq 'PrepareBrowserExtension' -and $preparedData.llmInstructions[0] -match 'did not connect to Halo') 'Preparation report must distinguish write capability from live execution.'
+    $fakeDirectory=Join-Path $fixture 'fake-write-tool'; [void][IO.Directory]::CreateDirectory($fakeDirectory)
+    @{id='unapproved-write';name='Unapproved';purpose='Fixture';entryPoint='Invoke-Report.ps1';readOnly=$false;kind='browser-extension';launcherAction='PrepareExtension';requiresUserConfirmation=$true;parameters=@()} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $fakeDirectory 'launcher.json')
+    Set-Content -LiteralPath (Join-Path $fakeDirectory 'directions.txt') -Value 'Fixture only'
+    Set-Content -LiteralPath (Join-Path $fakeDirectory 'Invoke-Report.ps1') -Value 'param($Parameters,$Context)'
+    $fake=@(Get-ScriptCatalog $fakeDirectory)
+    Assert ($fake.Count -eq 1 -and ($fake[0].Errors -join ' ') -match 'reviewed Halo extension') 'An unrelated write-capable manifest bypassed the mode gate.'
     Clear-LauncherSession $context
 } finally {
     $resolved=[IO.Path]::GetFullPath($fixture)
@@ -76,5 +88,6 @@ try {
 & (Join-Path $root 'scripts/IntuneManagement/Test-Adapter.ps1')
 & (Join-Path $root 'scripts/azqr/tests/Test-Wrapper.ps1')
 & (Join-Path $root 'scripts/RebootHistory/Test-Adapter.ps1')
+& (Join-Path $root 'scripts/HaloAppointmentManager/Test-Adapter.ps1')
 'PASS: launcher syntax, manifest-only discovery, integrity checks, redaction, session cleanup, report roundtrip and partial/failure handling. No live target queries were made.'
 

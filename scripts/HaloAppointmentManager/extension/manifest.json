@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Halo Appointment Manager — bulk complete",
+  "version": "1.4.2",
+  "description": "Preview and explicitly confirm bulk appointment completion. Export human-readable results with LLM instructions.",
+  "host_permissions": ["https://support.isoutsource.com/*"],
+  "content_scripts": [
+    {"matches": ["https://support.isoutsource.com/*"], "js": ["hook.js"], "run_at": "document_start", "world": "MAIN"},
+    {"matches": ["https://support.isoutsource.com/*"], "js": ["core.js", "content.js"], "run_at": "document_idle"}
+  ]
+}

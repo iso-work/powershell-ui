@@ -15,7 +15,10 @@ if(-not(Test-Path -LiteralPath $path)) { continue }
 try {
 $manifest=Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -AsHashtable
 $errors=[Collections.Generic.List[string]]::new()
-if($manifest.readOnly -ne $true) { $errors.Add('Only read-only report adapters are allowed.') }
+$preparedExtension=$manifest.ContainsKey('kind') -and $manifest.kind -eq 'browser-extension' -and
+    $manifest.id -eq 'halo-appointment-manager' -and $manifest.launcherAction -eq 'PrepareExtension' -and
+    $manifest.requiresUserConfirmation -eq $true
+if($manifest.readOnly -ne $true -and -not $preparedExtension) { $errors.Add('Only read-only reports or the reviewed Halo extension preparation workflow are allowed.') }
 if($manifest.entryPoint -ne 'Invoke-Report.ps1') { $errors.Add('Unsupported entry point.') }
 $entry=Join-Path $directory 'Invoke-Report.ps1'; $hash=''
 if(-not(Test-Path -LiteralPath $entry)) { $errors.Add('Entry point missing.') }

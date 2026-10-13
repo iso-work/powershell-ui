@@ -1,6 +1,8 @@
-# Read-only PowerShell infrastructure reports
+# PowerShell infrastructure reports and tools
 
-Windows desktop launcher for four reviewed reporting workflows. Select a report, read its purpose and directions, enter scope parameters, and run it. Results appear as a readable report, a record table, and structured JSON. Every run writes local report.json and report.md, including explicit instructions for an LLM.
+Windows desktop launcher for four read-only reporting workflows and one reviewed Halo appointment manager extension. Select a tool, read its purpose and directions, enter parameters, and run it. Results appear as a readable report, a record table, and structured JSON. Every launcher run writes local report.json and report.md, including explicit instructions for an LLM.
+
+Halo is the explicit write-capable exception: the launcher prepares local extension files, while live appointment completion requires a separate reviewed selection and confirmation inside Halo. Other reports remain read-only.
 
 ## Launch
 
@@ -28,14 +30,37 @@ Windows file paths use backslashes, for example C:\iso-psrepo\tools\azqr.exe. We
 | IntuneManagement: read-only inventory | Read configuration/compliance policies, applications, settings catalog metadata, and optional safe device inventory | Tenant ID and public-client application ID, interactive Microsoft sign-in, Intune licensing and read permissions |
 | Azure Quick Review | Read Azure resource inventory and assessment findings for one subscription, optionally one resource group | Tenant ID, subscription ID, an Azure application session credential (application ID and secret), application with Reader role, verified AZQR 4.2.0 binary |
 | Reboot history | Show Windows starts, Intentional/Unintentional/Uncertain classifications and nearby System-log errors | Localhost or one remote Windows machine; System event log read permission; optional Directory account session credential for remote reads |
+| Halo appointment manager | Prepare an Edge/Chrome extension for human-confirmed completion of multiple appointments | Exact HTTPS Halo site; normal signed-in browser session; Halo completion permission; unique active Do Not Bill rate |
 
 Each scripts\<tool>\directions.txt explains its purpose, exact inputs, permissions, output and limitations. Each launcher.json supplies the name, purpose, formatted guide and typed controls. Source copies live in each tool's upstream directory, with pinned provenance in UPSTREAM.json.
 
-CleanupMonster and IntuneManagement upstream applications include write operations. They are retained as source references; this launcher exposes separate read-only adapters with narrower coverage. No cleanup, import, delete, policy changes, remediation or arbitrary upstream script execution is available from the UI. Intune uses fixed Microsoft Graph GET endpoints. AZQR uses the reviewed default scan, fixed flags, pinned executable checksums and an isolated plugin directory.
+CleanupMonster and IntuneManagement upstream applications include write operations. They are retained as source references; this launcher exposes separate read-only adapters with narrower coverage. Their cleanup, import, delete and policy-changing operations are unavailable. Intune uses fixed Microsoft Graph GET endpoints. AZQR uses the reviewed default scan, fixed flags, pinned executable checksums and an isolated plugin directory. Arbitrary upstream script execution is unavailable.
 
 AD computer audit does not reproduce every CleanupMonster selection rule. Intune inventory does not include assignments, effective policy, settings catalog settings, scripts, or every upstream object type. Directions and report limitations state this explicitly.
 
 Reboot history defaults to 30 days and the latest 50 starts. It opens a compact history table automatically and retains complete evidence in JSON. It checks Critical/Error events within 10 minutes before and after each start, adjustable to 1-60 minutes. Only retained System events are read; a missing request remains Uncertain, conflicting evidence is not forced into a binary classification, and nearby errors are not proof of a reboot's cause. Starts include power-on after shutdown; fallback service starts are explicitly unconfirmed. It never restarts a machine or changes its event logging, services, firewall or remote-access settings. See scripts\RebootHistory\directions.txt for the classification rules and collection limits.
+
+## Halo appointment manager
+
+The supplied v1.4.1 archive is preserved verbatim in scripts\HaloAppointmentManager\upstream with file checksums in UPSTREAM.json. Its original delete and experimental edit operations remain reference material. The reviewed extension in extension\ provides bulk completion only; it has no delete, general edit, billing-rate selection or follow-up creation.
+
+1. Select **Halo appointment manager** in the launcher, enter the exact HTTPS Halo address, and choose **Prepare extension**.
+2. Open the report folder. Load its **extension** subfolder using **Load unpacked** in Edge or Chrome, if permitted by your browser policy. Disable the original extension first.
+3. Sign in to Halo normally, open Calendar, then **Halo appointments**. Read appointments and select exact rows.
+4. Choose **Preview completion**, review IDs/dates/agent/host, acknowledge the changes and type the displayed **COMPLETE count**.
+5. Review each outcome. Save the Markdown or JSON report with its embedded LLM instructions.
+
+The extension rereads every item before POST, skips changed or ineligible appointments, processes requests sequentially and verifies completion by a subsequent read. It stops on unknown outcomes and never automatically retries a completion POST. **Stop after current item** cannot undo a request already sent. It requires a uniquely named active **Do Not Bill** rate rather than assuming a numeric ID.
+
+Halo's bearer token stays in browser memory. This tool does not scan browser storage or store tokens/passwords. **Close and clear session** or unloading the tab clears the manager's cache, without revoking Halo's independent sign-in. The PowerShell launcher never receives Halo credentials; closing PowerShell cannot clear a separately running browser extension.
+
+The launcher's preparation report is not a live completion report: it states **PrepareBrowserExtension**, zero Halo requests and zero completed appointments. The extension exports its own per-item results after explicit human confirmation. No live Halo tenant was queried or changed during development. Validate one appointment and its billing/calendar/automation effects before a larger batch; the adapted request contract is based on the supplied archive and tested with mocks.
+
+See scripts\HaloAppointmentManager\directions.txt, extension\README.md and extension\llm-instructions.txt for all steps, outcomes and limits.
+
+Command-line package preparation:
+
+    pwsh -File .\scripts\HaloAppointmentManager\Prepare-Extension.ps1 -HaloUrl https://support.isoutsource.com
 
 ## Credentials and Microsoft sign-in
 
@@ -85,7 +110,7 @@ Output location can be changed:
 
     pwsh -STA -File .\Start-PowerShellUI.ps1 -OutputRoot D:\Reports
 
-Cancellation cannot undo work already performed. These reviewed adapters only collect target data and write requested local artifacts; no remediation is performed.
+Cancellation cannot undo work already performed. The four reports collect target data and write requested local artifacts. Halo preparation also writes only local files; confirmed live appointment completion occurs separately in the browser.
 
 ## Source snapshots and GitHub
 
@@ -94,6 +119,8 @@ infrastructure/upstream-sources.json pins the three upstream commits. The GitHub
     pwsh -File .\infrastructure\Sync-Upstream.ps1 -RepositoryRoot .
 
 Upstream nested .github workflows are reference files and are not active repository workflows. Git submodule entries remain uninitialized, matching a normal non-recursive source checkout. CleanupMonster provides no LICENSE in this pinned snapshot; its copyright headers are preserved. IntuneManagement and AZQR retain their upstream licenses.
+
+The Halo archive is a user-supplied source snapshot, preserved separately from the three GitHub snapshots. Its original package includes no license file; no license was invented.
 
 Reports and tools are ignored by Git. Do not commit credentials or output reports.
 
@@ -108,5 +135,7 @@ See [Microsoft 365 report options](docs/Microsoft365-report-options.md) for the 
 
 Tests use synthetic AD/Graph data and a compiled fake native process; no live tenant, directory or Azure queries are performed.
 
-Discovery is recursive and manifest-only. upstream, tests, infrastructure, reports, work, .git and directory junctions are excluded. A readOnly flag is documentation, not a security sandbox. The catalog also verifies adapter entrypoint hashes against infrastructure/adapters.lock.json, and the worker rechecks at launch. Local files and the registry must be trusted. Review any adapter change for read-only behavior before updating its registered hash. Ordinary .ps1 files and upstream management entrypoints are never automatically exposed.
+Halo verification additionally requires Node.js and uses synthetic API responses and a mocked DOM/session bridge. It checks exact confirmation, stale data, duplicate clicks, stop behavior, unknown outcomes, safe report exports and source/package integrity. Node is required only for verification, not for normal launcher/extension use.
+
+Discovery is recursive and manifest-only. upstream, tests, infrastructure, reports, work, .git and directory junctions are excluded. A readOnly flag is documentation, not a security sandbox. The catalog permits read-only adapters plus only the explicitly identified Halo browser-extension preparation mode with user confirmation metadata. It verifies entrypoint hashes against infrastructure/adapters.lock.json, and the worker rechecks at launch. Halo preparation also checks fixed extension asset hashes. Local files and the registry must be trusted. Review behavior before updating any registered hash. Ordinary .ps1 files and upstream management entrypoints are never automatically exposed.
 

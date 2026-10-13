@@ -22,20 +22,20 @@ function Add-LayoutRow { param($Layout,[int]$Height) [void]$Layout.RowStyles.Add
 function New-ReadingBox {
 $box=[Windows.Forms.RichTextBox]::new(); $box.Dock='Fill'; $box.ReadOnly=$true; $box.BorderStyle='None'; $box.BackColor=[Drawing.Color]::White; $box.DetectUrls=$false; return $box
 }
-$form=[Windows.Forms.Form]::new(); $form.Text='Infrastructure reports — read-only'; $form.Size=[Drawing.Size]::new(1320,930); $form.MinimumSize=[Drawing.Size]::new(1080,760); $form.StartPosition='CenterScreen'
+$form=[Windows.Forms.Form]::new(); $form.Text='Infrastructure reports and tools'; $form.Size=[Drawing.Size]::new(1320,930); $form.MinimumSize=[Drawing.Size]::new(1080,760); $form.StartPosition='CenterScreen'
 $form.Font=[Drawing.Font]::new('Segoe UI',11); $form.AutoScaleMode='Dpi'; $form.BackColor=$script:page
 $rootLayout=[Windows.Forms.TableLayoutPanel]::new(); $rootLayout.Dock='Fill'; $rootLayout.Padding=[Windows.Forms.Padding]::new(18); $rootLayout.ColumnCount=1; $rootLayout.RowCount=2
 [void]$rootLayout.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::Percent,100))
 Add-LayoutRow $rootLayout 88; [void]$rootLayout.RowStyles.Add([Windows.Forms.RowStyle]::new([Windows.Forms.SizeType]::Percent,100)); $form.Controls.Add($rootLayout)
 $banner=[Windows.Forms.Panel]::new(); $banner.Dock='Fill'
-$appTitle=[Windows.Forms.Label]::new(); $appTitle.Text='Infrastructure reports'; $appTitle.Font=[Drawing.Font]::new('Segoe UI',22,[Drawing.FontStyle]::Bold); $appTitle.ForeColor=$script:ink; $appTitle.AutoSize=$true
-$steps=[Windows.Forms.Label]::new(); $steps.Text='1  Choose a report     2  Read the guide     3  Enter parameters     4  Run and review'; $steps.AutoSize=$true; $steps.ForeColor=$script:muted; $steps.Location=[Drawing.Point]::new(2,48)
+$appTitle=[Windows.Forms.Label]::new(); $appTitle.Text='Infrastructure reports and tools'; $appTitle.Font=[Drawing.Font]::new('Segoe UI',22,[Drawing.FontStyle]::Bold); $appTitle.ForeColor=$script:ink; $appTitle.AutoSize=$true
+$steps=[Windows.Forms.Label]::new(); $steps.Text='1  Choose a tool     2  Read the guide     3  Enter parameters     4  Run and review'; $steps.AutoSize=$true; $steps.ForeColor=$script:muted; $steps.Location=[Drawing.Point]::new(2,48)
 $banner.Controls.AddRange(@($appTitle,$steps)); $rootLayout.Controls.Add($banner,0,0)
 $split=[Windows.Forms.SplitContainer]::new(); $split.Dock='Fill'; $split.Size=[Drawing.Size]::new(1250,780); $split.SplitterDistance=285; $split.SplitterWidth=12; $split.Panel1MinSize=240; $split.Panel2MinSize=650; $rootLayout.Controls.Add($split,0,1)
 $library=[Windows.Forms.TableLayoutPanel]::new(); $library.Dock='Fill'; $library.ColumnCount=1; $library.RowCount=5
 [void]$library.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::Percent,100))
 Add-LayoutRow $library 30; Add-LayoutRow $library 44; [void]$library.RowStyles.Add([Windows.Forms.RowStyle]::new([Windows.Forms.SizeType]::Percent,100)); Add-LayoutRow $library 66; Add-LayoutRow $library 138; $split.Panel1.Controls.Add($library)
-$libraryTitle=[Windows.Forms.Label]::new(); $libraryTitle.Text='REPORT LIBRARY'; $libraryTitle.AutoSize=$true; $libraryTitle.ForeColor=$script:muted; $libraryTitle.Font=[Drawing.Font]::new('Segoe UI',10,[Drawing.FontStyle]::Bold)
+$libraryTitle=[Windows.Forms.Label]::new(); $libraryTitle.Text='TOOLS AND REPORTS'; $libraryTitle.AutoSize=$true; $libraryTitle.ForeColor=$script:muted; $libraryTitle.Font=[Drawing.Font]::new('Segoe UI',10,[Drawing.FontStyle]::Bold)
 $search=[Windows.Forms.TextBox]::new(); $search.Dock='Top'; $search.PlaceholderText='Search reports'; $search.Margin=[Windows.Forms.Padding]::new(0,4,8,10)
 $list=[Windows.Forms.ListBox]::new(); $list.Dock='Fill'; $list.DisplayMember='DisplayName'; $list.BorderStyle='None'; $list.IntegralHeight=$false; $list.ItemHeight=36; $list.DrawMode='OwnerDrawFixed'; $list.Margin=[Windows.Forms.Padding]::new(0,0,8,12)
 $list.Add_DrawItem({
@@ -71,10 +71,10 @@ $bottom=[Windows.Forms.TableLayoutPanel]::new(); $bottom.Dock='Fill'; $bottom.Co
 [void]$bottom.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::Percent,100))
 Add-LayoutRow $bottom 44; Add-LayoutRow $bottom 26; [void]$bottom.RowStyles.Add([Windows.Forms.RowStyle]::new([Windows.Forms.SizeType]::Percent,100))
 $actions=[Windows.Forms.FlowLayoutPanel]::new(); $actions.Dock='Fill'
-$run=[Windows.Forms.Button]::new(); $run.Text='Run report'; $run.Enabled=$false; $run.Width=135; Set-ButtonStyle $run $true
+$run=[Windows.Forms.Button]::new(); $run.Text='Run report'; $run.Enabled=$false; $run.Width=165; Set-ButtonStyle $run $true
 $stop=[Windows.Forms.Button]::new(); $stop.Text='Cancel'; $stop.Enabled=$false; $stop.Width=100; Set-ButtonStyle $stop
 $open=[Windows.Forms.Button]::new(); $open.Text='Open report folder'; $open.Width=185; $open.Enabled=$false; Set-ButtonStyle $open; $actions.Controls.AddRange(@($run,$stop,$open))
-$statusLabel=[Windows.Forms.Label]::new(); $statusLabel.Text='STATUS AND MICROSOFT SIGN-IN'; $statusLabel.ForeColor=$script:muted; $statusLabel.AutoSize=$true; $statusLabel.Font=[Drawing.Font]::new('Segoe UI',9,[Drawing.FontStyle]::Bold)
+$statusLabel=[Windows.Forms.Label]::new(); $statusLabel.Text='STATUS AND SIGN-IN'; $statusLabel.ForeColor=$script:muted; $statusLabel.AutoSize=$true; $statusLabel.Font=[Drawing.Font]::new('Segoe UI',9,[Drawing.FontStyle]::Bold)
 $status=[Windows.Forms.TextBox]::new(); $status.Dock='Fill'; $status.Multiline=$true; $status.ReadOnly=$true; $status.ScrollBars='Vertical'; $status.BackColor=[Drawing.Color]::White; $status.Text='Ready. Choose a report to see its guide.'; $status.Font=[Drawing.Font]::new('Segoe UI',10)
 $bottom.Controls.Add($actions,0,0); $bottom.Controls.Add($statusLabel,0,1); $bottom.Controls.Add($status,0,2); $content.Controls.Add($bottom,0,2)
 function Update-ParameterLayout {
@@ -193,12 +193,15 @@ $list.Add_SelectedIndexChanged({
     Set-Busy ($null -ne $script:job)
     if($null -eq $item) { $usage.Clear(); $details.Clear(); $selectedTitle.Text='Choose a report'; $selectedHint.Text='Select a report from the library.'; return }
     $selectedTitle.Text=$item.DisplayName
-    $selectedHint.Text='Read-only report  ·  '+$item.Name
+    $extensionTool=$item.Manifest.ContainsKey('kind') -and $item.Manifest.kind -eq 'browser-extension'
+    $selectedHint.Text=if($extensionTool){'Write-capable Halo extension  ·  Launcher prepares local files only'}else{'Read-only report  ·  '+$item.Name}
+    $run.Text=if($extensionTool){'Prepare extension'}else{'Run report'}
+    $memoryNote.Text=if($extensionTool){'Halo sign-in stays in the browser. Close the Halo manager to clear its token cache.'}else{'Read-only collection.'+[Environment]::NewLine+'Credentials stay in this session and are cleared when you exit.'}
     if($item.Manifest.ContainsKey('guide')) { Set-LauncherGuide $usage $item.Manifest } else { Set-LauncherTechnicalDetails $usage $item.Usage }
     Set-LauncherTechnicalDetails $details $item.Usage
     if($item.Errors.Count) { Add-GuideParagraph $usage ('Report unavailable: '+($item.Errors -join '; ')) 'heading' }
     $intro=[Windows.Forms.Label]::new(); $intro.AutoSize=$true; $intro.MaximumSize=[Drawing.Size]::new(650,0); $intro.ForeColor=$script:muted; $intro.Margin=[Windows.Forms.Padding]::new(0,0,0,12)
-    $intro.Text='Enter the values below. Required fields define the account or system to read. Enter credentials separately using Session credentials.'
+    $intro.Text=if($extensionTool){'Enter your Halo address. This prepares local extension files only. Sign in to Halo in Edge or Chrome; no Halo password or browser token is handled by this launcher.'}else{'Enter the values below. Required fields define the account or system to read. Enter credentials separately using Session credentials.'}
     $fields.Controls.Add($intro)
     foreach($parameter in $item.Parameters) { Add-ParameterCard $parameter }
     Update-ParameterLayout
@@ -274,7 +277,7 @@ $timer.Add_Tick({
 $run.Add_Click({
     try {
         $item=$list.SelectedItem
-        if($null -eq $item -or $item.Errors.Count) { throw 'Select a registered read-only report.' }
+        if($null -eq $item -or $item.Errors.Count) { throw 'Select a registered report or tool.' }
         $parameters=@{}
         foreach($parameter in $item.Parameters) {
             $control=$script:inputs[$parameter.name]
@@ -295,7 +298,8 @@ $run.Add_Click({
             Invoke-LauncherAdapter -Manifest $manifest -Parameters $parameters -Context $context -EntryPath $entry -OutputRoot $outputRoot -ExpectedHash $hash
         }
         [void]$script:worker.AddScript($workerCode).AddArgument((Join-Path $PSScriptRoot 'infrastructure/Launcher.psm1')).AddArgument($item.Manifest).AddArgument($parameters).AddArgument($script:session).AddArgument($item.Path).AddArgument($OutputRoot).AddArgument($item.Hash)
-        $script:lastReport=$null; $open.Enabled=$false; $reportText.Clear(); $jsonText.Clear(); $grid.DataSource=$null; $status.Text='Collecting read-only data. Microsoft sign-in instructions will appear here when needed.'
+        $script:lastReport=$null; $open.Enabled=$false; $reportText.Clear(); $jsonText.Clear(); $grid.DataSource=$null
+        $status.Text=if($item.Manifest.ContainsKey('kind') -and $item.Manifest.kind -eq 'browser-extension'){'Preparing the Halo extension locally. No Halo appointments are being read or changed.'}else{'Collecting read-only data. Microsoft sign-in instructions will appear here when needed.'}
         $tabs.SelectedTab=$resultTab
         $script:job=$script:worker.BeginInvoke(); Set-Busy $true; $timer.Start()
     } catch {
@@ -315,10 +319,11 @@ $form.Add_FormClosing({Stop-Report})
 Refresh-Catalog
 try {
     if($VerifyUi) {
-        if($list.Items.Count -ne 4) { throw 'Expected four reports.' }
+        if($list.Items.Count -ne 5) { throw 'Expected four reports and one Halo extension tool.' }
         for($index=0;$index -lt $list.Items.Count;$index++) {
             $list.SelectedIndex=$index
             if(-not $run.Enabled -or $script:inputs.Count -eq 0) { throw 'Manifest parameter controls or integrity gate failed.' }
+            if($list.SelectedItem.Manifest.id -eq 'halo-appointment-manager' -and ($run.Text -ne 'Prepare extension' -or $selectedHint.Text -notmatch 'Write-capable')) { throw 'Halo preparation must be clearly labelled as a write-capable extension, not a read-only scan.' }
             if($usage.Text -notmatch 'Before you start' -or $usage.Rtf -notmatch '\\pntext') { throw 'Readable guide headings or bullets missing.' }
             foreach($parameter in $list.SelectedItem.Parameters) {
                 $editor=$script:inputs[$parameter.name]
@@ -357,12 +362,16 @@ try {
             $gridTab.Text='Record table'
             $form.ShowInTaskbar=$false; $form.StartPosition='Manual'; $form.Location=[Drawing.Point]::new(-30000,-30000); $form.Opacity=0
             $form.Show(); [Windows.Forms.Application]::DoEvents()
-            foreach($view in @('guide','parameters','compact','reboot-parameters','reboot-table')) {
+            foreach($view in @('guide','parameters','compact','reboot-parameters','reboot-table','halo-guide','halo-parameters')) {
                 if($view -like 'reboot-*') {
                     $form.Size=[Drawing.Size]::new(1320,930)
                     $list.SelectedIndex=@($list.Items | ForEach-Object {$_.Manifest.id}).IndexOf('windows-reboot-history')
                 }
-                $tabs.SelectedTab=if($view -eq 'guide'){$usageTab}elseif($view -eq 'reboot-table'){$gridTab}else{$paramTab}
+                if($view -like 'halo-*') {
+                    $form.Size=[Drawing.Size]::new(1320,930)
+                    $list.SelectedIndex=@($list.Items | ForEach-Object {$_.Manifest.id}).IndexOf('halo-appointment-manager')
+                }
+                $tabs.SelectedTab=if($view -in @('guide','halo-guide')){$usageTab}elseif($view -eq 'reboot-table'){$gridTab}else{$paramTab}
                 if($view -eq 'compact') { $form.Size=$form.MinimumSize }
                 $null=$form.Handle
                 $form.PerformLayout(); $rootLayout.PerformLayout(); $split.PerformLayout(); $content.PerformLayout(); $tabs.PerformLayout(); $fields.PerformLayout()
@@ -376,7 +385,7 @@ try {
             Show-CredentialDialog -PreviewFile (Join-Path $PreviewPath 'launcher-credentials.png')
             $form.Hide()
         }
-        'PASS: four manifests, formatted guides with bullets, bounded parameter controls, Windows paths, integrity gate, readable report, record table and JSON initialize in the Windows UI.'
+        'PASS: five manifests, formatted guides with bullets, bounded parameter controls, Windows paths, integrity gate, readable report, record table and JSON initialize in the Windows UI.'
     } else { [void]$form.ShowDialog() }
 } finally {
     try {

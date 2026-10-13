@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Halo Appointment Manager",
+  "version": "1.4.1",
+  "description": "Review, complete, and delete past and upcoming Halo appointments in bulk using your existing Halo session.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://support.isoutsource.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://support.isoutsource.com/*"
+      ],
+      "js": [
+        "hook.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://support.isoutsource.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
