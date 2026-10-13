@@ -4,13 +4,15 @@ This reviewed variant of the supplied 1.4.1 extension prepares an exact appointm
 
 ## Install
 
-1. Use Edge or Chrome. Remove or disable the original Halo Appointment Manager extension so both versions do not run together.
-2. Open edge://extensions or chrome://extensions, enable Developer mode if permitted by your organization's browser policy, and choose Load unpacked.
-3. Select this directory, containing manifest.json. Do not select the ZIP or upstream source folder.
+1. In the PowerShell launcher, select Halo appointment manager, enter your Halo site in Parameters, open **Install extension**, and choose **Copy to C:\extensions**. It creates C:\extensions\HaloAppointmentManager and shows the exact folder. If copying a downloaded ZIP manually, create that folder and extract the ZIP so manifest.json is directly inside it.
+2. Use Edge or Chrome. Disable the original Halo Appointment Manager extension. Open edge://extensions or chrome://extensions, enable Developer mode if permitted by your organization's browser policy, and choose **Load unpacked**.
+3. Select the exact folder shown in the launcher, containing manifest.json. Do not select the ZIP or upstream source folder. Keep this folder in place while using the extension.
 4. Sign in to the configured Halo site normally and refresh its calendar page.
 5. Open Halo appointments, then Read appointments. If the session is not captured, leave the panel open and use Halo's own calendar navigation before reading again.
 
-The supplied default is https://support.isoutsource.com. To prepare this extension for another HTTPS Halo site, use Halo appointment manager in the PowerShell launcher; its Halo address field generates a package scoped to that exact host. It makes no live Halo requests.
+The copy button creates C:\extensions if needed and preserves existing files. It reuses an identical existing copy. If HaloAppointmentManager already contains different files, it creates a dated sibling instead and displays that path. **Open extension folder** opens the resulting directory. Copying does not install or enable the browser extension; Load unpacked is a manual step. The **Halo appointments** button appears on Halo's Calendar page after refresh, not in a separate Windows application.
+
+The supplied default is https://support.isoutsource.com. To prepare this extension for another HTTPS Halo site, use Halo appointment manager in the PowerShell launcher; its Halo address field generates a package scoped to that exact host. It makes no live Halo requests. **Prepare extension** is also available for package-only preparation: its report folder contains an extension subfolder and a ZIP.
 
 ## Review and complete
 

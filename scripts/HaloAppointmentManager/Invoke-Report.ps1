@@ -16,9 +16,9 @@ $expectedFiles=@{
     'content.js' = '025B2C87D5B28567FD8B189A3F9ECC1A83648B791ADDA499E7BAF6D15BD240E9'
     'core.js' = '780F08C3DB3F476E7FC5627B433A5B04F4F99A8DA79B0083D2681E5FB1CDE3ED'
     'hook.js' = '338F276F1231B4B88CBA2B9610DBE6A93D5B7FFC603AAB209FE031FBA419BDD8'
-    'llm-instructions.txt' = '24A2E5D52E1DCB0BACAC65AAC3B820626FD377BC4F0C800B9540E9AE26D8D73B'
+    'llm-instructions.txt' = 'AC130DE2BD13DC1515032270FA84257913C169AC10BBF781D05D4D69684EB482'
     'manifest.json' = 'CCCFF7F2DDB51EFE980179DF82E1FC4465299A03D863CCEF11FB80CB6CDF6486'
-    'README.md' = '2A0BB5E8ACDA4923A4C2EFD96D6449AF2C9762ADEC4AA2EF099AE762D9FB678B'
+    'README.md' = 'B571F83CE183E88098574C1D7D56F5CDA9E0B93DBDD7B3D35E6C3C56A601BEF7'
 }
 if($expectedFiles.Count -lt 5) { throw 'Reviewed extension hashes are missing.' }
 $source=Join-Path $PSScriptRoot 'extension'
@@ -39,18 +39,22 @@ $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $manifestPath -E
 $zipPath=Join-Path $Context.RunDirectory 'halo-appointment-manager.zip'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::CreateFromDirectory($destination,$zipPath)
+$packageFiles=[ordered]@{}
+foreach($name in $expectedFiles.Keys) { $packageFiles[$name]=(Get-FileHash -LiteralPath (Join-Path $destination $name) -Algorithm SHA256).Hash }
 [pscustomobject]@{
     Summary=[pscustomobject][ordered]@{
-        Operation='PrepareBrowserExtension';Version=$manifest.version;HaloOrigin=$origin
+        Operation='PrepareBrowserExtension';ToolId='halo-appointment-manager';Version=$manifest.version;HaloOrigin=$origin
         LiveHaloRequests=0;AppointmentsCompleted=0;PackageFolder=$destination;ZipPath=$zipPath
+        SuggestedInstallFolder='C:\extensions\HaloAppointmentManager';PackageFilesSha256=$packageFiles
         ZipSha256=(Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
         ExtensionCanWrite=$true;RequiresExactSelectionConfirmation=$true
     }
     Records=@(
-        [pscustomobject]@{Step=1;Instruction='Disable the original extension, then load this reviewed folder using Load unpacked in Edge or Chrome.';Location=$destination}
-        [pscustomobject]@{Step=2;Instruction='Sign in to Halo normally and open its calendar. Open Halo appointments and Read appointments.';Location=($origin+'/calendar')}
-        [pscustomobject]@{Step=3;Instruction='Select exact IDs, preview, acknowledge the changes and type the displayed COMPLETE count. The PowerShell launcher has not completed anything.';Location='Browser extension'}
-        [pscustomobject]@{Step=4;Instruction='Review each outcome and save Markdown or JSON results with embedded LLM instructions. Close the Halo manager to clear its token cache.';Location='Browser downloads'}
+        [pscustomobject]@{Step=1;Instruction='Open Install extension and choose Copy to C:\extensions. The launcher creates the folder and displays the exact installation path.';Location='C:\extensions\HaloAppointmentManager'}
+        [pscustomobject]@{Step=2;Instruction='Disable the older extension. Enable Developer mode if permitted, choose Load unpacked and select the displayed folder containing manifest.json. Browser installation is manual.';Location='edge://extensions or chrome://extensions'}
+        [pscustomobject]@{Step=3;Instruction='Sign in to Halo normally and refresh its Calendar page. Open Halo appointments and Read appointments.';Location=($origin+'/calendar')}
+        [pscustomobject]@{Step=4;Instruction='Select exact IDs, preview, acknowledge the changes and type the displayed COMPLETE count. The PowerShell launcher has not completed anything.';Location='Browser extension'}
+        [pscustomobject]@{Step=5;Instruction='Review each outcome and save Markdown or JSON results with embedded LLM instructions. Close the Halo manager to clear its token cache.';Location='Browser downloads'}
     )
     Limitations=@(
         'This run prepared local files only. It did not contact Halo, authenticate, install a browser extension or change an appointment.',

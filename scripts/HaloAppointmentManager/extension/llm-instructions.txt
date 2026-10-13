@@ -7,6 +7,13 @@ Operation PrepareBrowserExtension describes local files and installation steps.
 It does not prove that Halo was contacted or that any appointment was completed.
 Do not infer permission to carry out appointment changes.
 
+LOCAL COPY REPORT
+Operation CopyExtensionFiles confirms a local folder and manual install steps.
+State the exact folder and Halo origin. BrowserInstalled=false means Load unpacked
+has not been verified; copying does not install or enable a browser extension.
+No Halo account was accessed and no appointment was completed by this operation.
+Use the displayed destination, which may be a dated sibling preserving old files.
+
 COMPLETION REPORT
 Identify planId, host, agent, selected appointment IDs, scope dates and timestamps.
 Summarize VerifiedCompleted, AlreadyCompleted, SkippedChanged, Failed, Unknown and

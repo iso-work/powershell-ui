@@ -41,14 +41,15 @@
       "Disable the original extension before loading this reviewed variant."
     ],
     "steps": [
-      "Open Parameters, enter the Halo site address, then choose Prepare extension.",
-      "Open the report folder. In Edge or Chrome Extensions, choose Load unpacked and select its extension subfolder.",
+      "Open Parameters and enter the exact HTTPS Halo site address.",
+      "Open Install extension and choose Copy to C:\\extensions. This prepares the package and creates C:\\extensions\\HaloAppointmentManager if needed. The exact folder is shown above the button.",
+      "Disable the older extension. Open edge://extensions or chrome://extensions, enable Developer mode if permitted, choose Load unpacked and select the displayed folder containing manifest.json.",
       "Open Halo Calendar, then Halo appointments. Read appointments and select exact rows.",
       "Choose Preview completion. Review every ID and date, acknowledge the changes, and type the displayed COMPLETE count.",
       "Review each result and save the report. Close the Halo manager to clear its cached token."
     ],
     "outcomes": [
-      "A local extension folder and ZIP, plus a preparation report with LLM instructions.",
+      "A local extension folder and ZIP, plus preparation and copy reports with LLM instructions. Browser installation is manual.",
       "Inside Halo: a selection preview, sequential completion, Stop control and per-item results.",
       "A browser-downloaded Markdown report and optional JSON, both with explicit LLM processing instructions."
     ],
@@ -57,6 +58,7 @@
       "No delete, experimental edit, billing-rate selection or follow-up creation is exposed.",
       "Changed items are skipped. Unverified or unknown outcomes stop the batch and are not automatically retried.",
       "Halo sign-in stays in the browser. Closing this PowerShell launcher does not clear a separate browser session.",
+      "Existing files in C:\\extensions are preserved. An identical copy is reused; a different existing HaloAppointmentManager folder is preserved and a dated sibling is created instead. Always use the displayed folder.",
       "Mock tests passed; the deployed Halo API contract must be validated on one appointment before bulk use."
     ]
   }

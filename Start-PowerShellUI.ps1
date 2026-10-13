@@ -7,10 +7,12 @@ Add-Type -AssemblyName System.Drawing
 Import-Module (Join-Path $PSScriptRoot 'infrastructure/Catalog.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'infrastructure/Launcher.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'infrastructure/Presentation.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'infrastructure/ExtensionFiles.psm1') -Force
 [void][Windows.Forms.Application]::SetHighDpiMode([Windows.Forms.HighDpiMode]::PerMonitorV2)
 [Windows.Forms.Application]::EnableVisualStyles()
 $script:session=New-LauncherSession
 $script:job=$null; $script:worker=$null; $script:catalog=@(); $script:inputs=@{}; $script:lastReport=$null
+$script:copyAfterPrepare=$false; $script:extensionFolder=''; $script:extensionsRoot='C:\extensions'
 $script:ink=[Drawing.ColorTranslator]::FromHtml('#173454'); $script:muted=[Drawing.ColorTranslator]::FromHtml('#526478')
 $script:accent=[Drawing.ColorTranslator]::FromHtml('#176B87'); $script:page=[Drawing.ColorTranslator]::FromHtml('#F2F5F9')
 function Set-ButtonStyle {
@@ -67,6 +69,28 @@ $grid=[Windows.Forms.DataGridView]::new(); $grid.Dock='Fill'; $grid.ReadOnly=$tr
 $fields=[Windows.Forms.FlowLayoutPanel]::new(); $fields.Dock='Fill'; $fields.FlowDirection='TopDown'; $fields.WrapContents=$false; $fields.AutoScroll=$true
 $usageTab.Controls.Add($usage); $paramTab.Controls.Add($fields); $resultTab.Controls.Add($reportText); $gridTab.Controls.Add($grid); $dataTab.Controls.Add($jsonText); $detailsTab.Controls.Add($details)
 $tabs.TabPages.AddRange(@($usageTab,$paramTab,$resultTab,$gridTab,$dataTab,$detailsTab)); $content.Controls.Add($tabs,0,1)
+$installTab=[Windows.Forms.TabPage]::new('Install extension'); $installTab.BackColor=[Drawing.Color]::White; $installTab.Padding=[Windows.Forms.Padding]::new(18)
+$installLayout=[Windows.Forms.TableLayoutPanel]::new(); $installLayout.Dock='Fill'; $installLayout.ColumnCount=1; $installLayout.RowCount=5
+[void]$installLayout.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::Percent,100))
+foreach($height in @(30,38,68,50)) { Add-LayoutRow $installLayout $height }
+[void]$installLayout.RowStyles.Add([Windows.Forms.RowStyle]::new([Windows.Forms.SizeType]::Percent,100))
+$installLabel=[Windows.Forms.Label]::new(); $installLabel.Text='Folder to select with Load unpacked'; $installLabel.AutoSize=$true; $installLabel.Font=[Drawing.Font]::new('Segoe UI',11,[Drawing.FontStyle]::Bold); $installLabel.ForeColor=$script:ink
+$installFolder=[Windows.Forms.TextBox]::new(); $installFolder.Dock='Top'; $installFolder.ReadOnly=$true; $installFolder.BackColor=[Drawing.Color]::White; $installFolder.Text='C:\extensions\HaloAppointmentManager'
+$installStatus=[Windows.Forms.Label]::new(); $installStatus.Dock='Fill'; $installStatus.ForeColor=$script:muted; $installStatus.Padding=[Windows.Forms.Padding]::new(0,6,0,0); $installStatus.Text='Not copied yet. The button below creates the directory and copies the extension files. Browser installation is manual.'
+$installActions=[Windows.Forms.FlowLayoutPanel]::new(); $installActions.Dock='Fill'
+$copyExtension=[Windows.Forms.Button]::new(); $copyExtension.Text='Copy to C:\extensions'; $copyExtension.Width=230; Set-ButtonStyle $copyExtension $true
+$openExtension=[Windows.Forms.Button]::new(); $openExtension.Text='Open extension folder'; $openExtension.Width=210; $openExtension.Enabled=$false; Set-ButtonStyle $openExtension
+$installActions.Controls.AddRange(@($copyExtension,$openExtension))
+$installGuide=New-ReadingBox; $installGuide.Font=$form.Font
+Add-GuideParagraph $installGuide 'Install in Edge or Chrome' 'heading'
+Add-GuideParagraph $installGuide '1. Choose Copy to C:\extensions. It prepares and copies the package for the Halo address in Parameters.'
+Add-GuideParagraph $installGuide '2. Disable the older Halo Appointment Manager extension if it is enabled.'
+Add-GuideParagraph $installGuide '3. Open edge://extensions in Edge, or chrome://extensions in Chrome.'
+Add-GuideParagraph $installGuide '4. Enable Developer mode if your browser policy permits it.'
+Add-GuideParagraph $installGuide '5. Choose Load unpacked, then select the exact folder displayed above. Select the folder containing manifest.json.'
+Add-GuideParagraph $installGuide '6. Refresh your Halo Calendar page. The Halo appointments button appears there.'
+Add-GuideParagraph $installGuide 'Copying files does not install anything in the browser or contact Halo. Existing extension files are preserved. If a different copy already exists, the new copy receives a dated folder name and its exact path appears above.' 'bullet'
+$installLayout.Controls.Add($installLabel,0,0); $installLayout.Controls.Add($installFolder,0,1); $installLayout.Controls.Add($installStatus,0,2); $installLayout.Controls.Add($installActions,0,3); $installLayout.Controls.Add($installGuide,0,4); $installTab.Controls.Add($installLayout)
 $bottom=[Windows.Forms.TableLayoutPanel]::new(); $bottom.Dock='Fill'; $bottom.ColumnCount=1; $bottom.RowCount=3; $bottom.Padding=[Windows.Forms.Padding]::new(0,12,0,0)
 [void]$bottom.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::Percent,100))
 Add-LayoutRow $bottom 44; Add-LayoutRow $bottom 26; [void]$bottom.RowStyles.Add([Windows.Forms.RowStyle]::new([Windows.Forms.SizeType]::Percent,100))
@@ -125,6 +149,8 @@ function Set-Busy([bool]$busy) {
     foreach($control in @($list,$search,$refresh,$credentials,$forget,$fields)) { $control.Enabled=-not $busy }
     $stop.Enabled=$busy
     $run.Enabled=(-not $busy -and $null -ne $list.SelectedItem -and $list.SelectedItem.Errors.Count -eq 0)
+    $copyExtension.Enabled=$run.Enabled -and $list.SelectedItem.Manifest.id -eq 'halo-appointment-manager'
+    $openExtension.Enabled=-not $busy -and -not [string]::IsNullOrWhiteSpace($script:extensionFolder)
 }
 function Update-List {
     $list.Items.Clear()
@@ -191,9 +217,11 @@ $list.Add_SelectedIndexChanged({
     foreach($old in @($fields.Controls)) { $fields.Controls.Remove($old); $old.Dispose() }
     $script:inputs=@{}; $item=$list.SelectedItem
     Set-Busy ($null -ne $script:job)
-    if($null -eq $item) { $usage.Clear(); $details.Clear(); $selectedTitle.Text='Choose a report'; $selectedHint.Text='Select a report from the library.'; return }
+    if($null -eq $item) { $tabs.TabPages.Remove($installTab); $usage.Clear(); $details.Clear(); $selectedTitle.Text='Choose a report'; $selectedHint.Text='Select a report from the library.'; return }
     $selectedTitle.Text=$item.DisplayName
     $extensionTool=$item.Manifest.ContainsKey('kind') -and $item.Manifest.kind -eq 'browser-extension'
+    if($extensionTool) { if(-not $tabs.TabPages.Contains($installTab)) { $tabs.TabPages.Insert(2,$installTab) } }
+    else { $tabs.TabPages.Remove($installTab) }
     $selectedHint.Text=if($extensionTool){'Write-capable Halo extension  ·  Launcher prepares local files only'}else{'Read-only report  ·  '+$item.Name}
     $run.Text=if($extensionTool){'Prepare extension'}else{'Run report'}
     $memoryNote.Text=if($extensionTool){'Halo sign-in stays in the browser. Close the Halo manager to clear its token cache.'}else{'Read-only collection.'+[Environment]::NewLine+'Credentials stay in this session and are cleared when you exit.'}
@@ -240,6 +268,14 @@ function Show-ReportResult {
             $tabs.SelectedTab=if($data.status -in @('Completed','Partial') -and $reportCatalogItem -and $reportCatalogItem.Manifest.ContainsKey('output') -and $reportCatalogItem.Manifest.output.ContainsKey('defaultView') -and $reportCatalogItem.Manifest.output.defaultView -eq 'table') { $gridTab } else { $resultTab }
 
 }
+function Copy-PreparedHaloExtension {
+    if(-not $script:lastReport -or $script:lastReport.Report.tool -ne 'halo-appointment-manager' -or $script:lastReport.Report.status -ne 'Completed') { throw 'Prepare the Halo extension first.' }
+    $receipt=Copy-HaloExtensionFiles -Preparation $script:lastReport.Report.summary -ExtensionsRoot $script:extensionsRoot -ReceiptDirectory (Split-Path -Parent $script:lastReport.JsonPath)
+    $script:extensionFolder=$receipt.folder; $installFolder.Text=$receipt.folder
+    $installStatus.Text=if($receipt.reusedExistingCopy){'The same files are already here. Select this folder in your browser using Load unpacked.'}elseif($receipt.preservedExistingFolder){'Copied to a new folder; the previous copy was preserved. Select the exact folder shown above using Load unpacked.'}else{'Files copied. Next, open your browser Extensions page and choose Load unpacked. Select the folder shown above.'}
+    $status.AppendText([Environment]::NewLine+'Extension folder: '+$receipt.folder)
+    $tabs.SelectedTab=$installTab
+}
 $timer=[Windows.Forms.Timer]::new(); $timer.Interval=300
 $timer.Add_Tick({
     $message=''
@@ -260,6 +296,20 @@ $timer.Add_Tick({
             Show-ReportResult
             $status.AppendText([Environment]::NewLine+"$($script:lastReport.Report.status): $($script:lastReport.JsonPath)")
             $open.Enabled=$true
+            if($script:lastReport.Report.tool -eq 'halo-appointment-manager' -and $script:lastReport.Report.status -eq 'Completed') {
+                $tabs.SelectedTab=$installTab
+                if($script:copyAfterPrepare) {
+                    try { Copy-PreparedHaloExtension }
+                    catch {
+                        $installStatus.Text='Copy failed: '+$_.Exception.Message
+                        $status.AppendText([Environment]::NewLine+$installStatus.Text)
+                    }
+                } else {
+                    $installStatus.Text='Package prepared. Choose Copy to C:\extensions below, then follow the browser installation steps. Open report folder shows the original package.'
+                }
+            } elseif($script:copyAfterPrepare) {
+                $installStatus.Text='Preparation did not complete. No files were copied to C:\extensions. See Report for details.'
+            }
         } else { $status.AppendText([Environment]::NewLine+'No completed report was returned. Collection failed or was cancelled.') }
     } catch {
         $status.AppendText([Environment]::NewLine+'Collection stopped or failed before report creation. Do not interpret missing results as healthy.')
@@ -272,7 +322,7 @@ $timer.Add_Tick({
             $open.Enabled=$true; $tabs.SelectedTab=$resultTab
         }
     }
-    finally { $script:worker.Dispose(); $script:worker=$null; $script:job=$null; Set-Busy $false }
+    finally { $script:copyAfterPrepare=$false; $script:worker.Dispose(); $script:worker=$null; $script:job=$null; Set-Busy $false }
 })
 $run.Add_Click({
     try {
@@ -304,8 +354,18 @@ $run.Add_Click({
         $script:job=$script:worker.BeginInvoke(); Set-Busy $true; $timer.Start()
     } catch {
         if($script:worker -and $null -eq $script:job) { $script:worker.Dispose(); $script:worker=$null }
+        $script:copyAfterPrepare=$false
         [void][Windows.Forms.MessageBox]::Show($_.Exception.Message,'Report parameters')
     }
+})
+$copyExtension.Add_Click({
+    if($null -ne $script:job -or -not $run.Enabled -or $list.SelectedItem.Manifest.id -ne 'halo-appointment-manager') { return }
+    $script:copyAfterPrepare=$true
+    $installStatus.Text='Preparing the package, then copying it to C:\extensions. No browser installation or Halo changes are being made.'
+    $run.PerformClick()
+})
+$openExtension.Add_Click({
+    if($script:extensionFolder -and (Test-Path -LiteralPath $script:extensionFolder -PathType Container)) { Start-Process explorer.exe -ArgumentList @($script:extensionFolder) }
 })
 function Stop-Report {
     if($null -eq $script:worker) { return }
@@ -324,6 +384,7 @@ try {
             $list.SelectedIndex=$index
             if(-not $run.Enabled -or $script:inputs.Count -eq 0) { throw 'Manifest parameter controls or integrity gate failed.' }
             if($list.SelectedItem.Manifest.id -eq 'halo-appointment-manager' -and ($run.Text -ne 'Prepare extension' -or $selectedHint.Text -notmatch 'Write-capable')) { throw 'Halo preparation must be clearly labelled as a write-capable extension, not a read-only scan.' }
+            if($tabs.TabPages.Contains($installTab) -ne ($list.SelectedItem.Manifest.id -eq 'halo-appointment-manager')) { throw 'Extension installation tab is not scoped to the Halo tool.' }
             if($usage.Text -notmatch 'Before you start' -or $usage.Rtf -notmatch '\\pntext') { throw 'Readable guide headings or bullets missing.' }
             foreach($parameter in $list.SelectedItem.Parameters) {
                 $editor=$script:inputs[$parameter.name]
@@ -331,6 +392,37 @@ try {
                 if($parameter.type -eq 'integer' -and $editor -isnot [Windows.Forms.NumericUpDown]) { throw 'Integer parameter needs a numeric editor.' }
                 if($parameter.ContainsKey('maximum') -and $editor.Maximum -ne $parameter.maximum) { throw 'Declared parameter maximum was not applied.' }
             }
+        }
+        # Exercise the actual button and asynchronous completion in a temporary directory.
+        # Verification never writes to the user's C:\extensions or opens a browser.
+        $copyFixture=Join-Path ([IO.Path]::GetTempPath()) ('launcher-copy-'+[guid]::NewGuid())
+        $savedOutputRoot=$OutputRoot
+        try {
+            $OutputRoot=Join-Path $copyFixture 'reports'; $script:extensionsRoot=Join-Path $copyFixture 'extensions'
+            $list.SelectedIndex=@($list.Items | ForEach-Object {$_.Manifest.id}).IndexOf('halo-appointment-manager')
+            $script:inputs.HaloUrl.Text='https://halo.ui-fixture.example'
+            $form.ShowInTaskbar=$false; $form.StartPosition='Manual'; $form.Location=[Drawing.Point]::new(-30000,-30000); $form.Opacity=0
+            $form.Show(); $tabs.SelectedTab=$installTab; [Windows.Forms.Application]::DoEvents()
+            $copyExtension.PerformClick()
+            if($null -eq $script:job) { throw 'Copy button did not start preparation.' }
+            $deadline=[DateTime]::UtcNow.AddSeconds(20)
+            while($null -ne $script:job -and [DateTime]::UtcNow -lt $deadline) { [Windows.Forms.Application]::DoEvents(); [Threading.Thread]::Sleep(25) }
+            if($null -ne $script:job) { throw 'Extension copy button timed out.' }
+            $expectedFolder=Join-Path $script:extensionsRoot 'HaloAppointmentManager'
+            if($script:extensionFolder -ne $expectedFolder -or $installFolder.Text -ne $expectedFolder -or $tabs.SelectedTab -ne $installTab -or -not $openExtension.Enabled) { throw ('Extension destination or copy UI failed: '+$installStatus.Text) }
+            $copiedManifest=Get-Content -LiteralPath (Join-Path $expectedFolder 'manifest.json') -Raw | ConvertFrom-Json -AsHashtable
+            if($copiedManifest.host_permissions[0] -ne 'https://halo.ui-fixture.example/*') { throw 'Copy button did not use the current Halo address.' }
+            $copyReceipt=Get-Content -LiteralPath (Join-Path (Split-Path -Parent $script:lastReport.JsonPath) 'extension-copy.json') -Raw | ConvertFrom-Json
+            if($copyReceipt.operation -ne 'CopyExtensionFiles' -or $copyReceipt.browserInstalled -or $copyReceipt.liveHaloRequests -ne 0) { throw 'Copy receipt incorrectly claims installation or Halo activity.' }
+        } finally {
+            Stop-Report; $form.Hide(); $OutputRoot=$savedOutputRoot; $script:extensionsRoot='C:\extensions'
+            $script:extensionFolder=''; $script:lastReport=$null; $installFolder.Text='C:\extensions\HaloAppointmentManager'
+            $installStatus.Text='Not copied yet. The button below creates the directory and copies the extension files. Browser installation is manual.'
+            $status.Text='Choose a tool, read its guide, then enter parameters.'; $open.Enabled=$false
+            Set-Busy $false
+            $resolved=[IO.Path]::GetFullPath($copyFixture); $tempBase=[IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+            if(-not $resolved.StartsWith($tempBase,[StringComparison]::OrdinalIgnoreCase) -or (Split-Path $resolved -Leaf) -notlike 'launcher-copy-*') { throw 'Unexpected copy test cleanup path.' }
+            if(Test-Path -LiteralPath $resolved) { Remove-Item -LiteralPath $resolved -Recurse -Force }
         }
         $displayFixture=Join-Path ([IO.Path]::GetTempPath()) ('launcher-display-'+[guid]::NewGuid())
         [void](New-Item -ItemType Directory -Path $displayFixture)
@@ -362,7 +454,7 @@ try {
             $gridTab.Text='Record table'
             $form.ShowInTaskbar=$false; $form.StartPosition='Manual'; $form.Location=[Drawing.Point]::new(-30000,-30000); $form.Opacity=0
             $form.Show(); [Windows.Forms.Application]::DoEvents()
-            foreach($view in @('guide','parameters','compact','reboot-parameters','reboot-table','halo-guide','halo-parameters')) {
+            foreach($view in @('guide','parameters','compact','reboot-parameters','reboot-table','halo-guide','halo-parameters','halo-install','halo-install-compact')) {
                 if($view -like 'reboot-*') {
                     $form.Size=[Drawing.Size]::new(1320,930)
                     $list.SelectedIndex=@($list.Items | ForEach-Object {$_.Manifest.id}).IndexOf('windows-reboot-history')
@@ -371,8 +463,8 @@ try {
                     $form.Size=[Drawing.Size]::new(1320,930)
                     $list.SelectedIndex=@($list.Items | ForEach-Object {$_.Manifest.id}).IndexOf('halo-appointment-manager')
                 }
-                $tabs.SelectedTab=if($view -in @('guide','halo-guide')){$usageTab}elseif($view -eq 'reboot-table'){$gridTab}else{$paramTab}
-                if($view -eq 'compact') { $form.Size=$form.MinimumSize }
+                $tabs.SelectedTab=if($view -in @('guide','halo-guide')){$usageTab}elseif($view -like 'halo-install*'){$installTab}elseif($view -eq 'reboot-table'){$gridTab}else{$paramTab}
+                if($view -in @('compact','halo-install-compact')) { $form.Size=$form.MinimumSize }
                 $null=$form.Handle
                 $form.PerformLayout(); $rootLayout.PerformLayout(); $split.PerformLayout(); $content.PerformLayout(); $tabs.PerformLayout(); $fields.PerformLayout()
                 Update-ParameterLayout
@@ -385,7 +477,7 @@ try {
             Show-CredentialDialog -PreviewFile (Join-Path $PreviewPath 'launcher-credentials.png')
             $form.Hide()
         }
-        'PASS: five manifests, formatted guides with bullets, bounded parameter controls, Windows paths, integrity gate, readable report, record table and JSON initialize in the Windows UI.'
+        'PASS: five manifests, formatted guides, bounded parameters, Windows paths, integrity gate, report/table/JSON and actual async extension copy button with current Halo address and manual-install receipt. Copy verification used a temporary folder only.'
     } else { [void]$form.ShowDialog() }
 } finally {
     try {

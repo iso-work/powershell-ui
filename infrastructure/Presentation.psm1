@@ -23,11 +23,17 @@ function Set-LauncherGuide {
     param([Windows.Forms.RichTextBox]$Box,[hashtable]$Manifest)
     $Box.Clear()
     Add-GuideParagraph $Box $Manifest.displayName 'title'
-    Add-GuideParagraph $Box 'What this report is for' 'heading'
+    $extensionTool=$Manifest.ContainsKey('kind') -and $Manifest.kind -eq 'browser-extension'
+    Add-GuideParagraph $Box $(if($extensionTool){'What this tool is for'}else{'What this report is for'}) 'heading'
     Add-GuideParagraph $Box $Manifest.guide.overview
+    if($extensionTool) {
+        Add-GuideParagraph $Box 'Where the extension goes' 'heading'
+        Add-GuideParagraph $Box 'C:\extensions\HaloAppointmentManager'
+        Add-GuideParagraph $Box 'Open Install extension and choose Copy to C:\extensions. The button creates the folder and shows the exact folder to select in your browser.'
+    }
     Add-GuideParagraph $Box 'Before you start' 'heading'
     foreach($text in $Manifest.guide.prerequisites) { Add-GuideParagraph $Box $text 'bullet' }
-    Add-GuideParagraph $Box 'Run the report' 'heading'
+    Add-GuideParagraph $Box $(if($extensionTool){'Copy files and install in your browser'}else{'Run the report'}) 'heading'
     $number=1
     foreach($text in $Manifest.guide.steps) { Add-GuideParagraph $Box ("$number. "+$text) 'step'; $number++ }
     Add-GuideParagraph $Box 'What you will see' 'heading'

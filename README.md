@@ -44,11 +44,14 @@ Reboot history defaults to 30 days and the latest 50 starts. It opens a compact 
 
 The supplied v1.4.1 archive is preserved verbatim in scripts\HaloAppointmentManager\upstream with file checksums in UPSTREAM.json. Its original delete and experimental edit operations remain reference material. The reviewed extension in extension\ provides bulk completion only; it has no delete, general edit, billing-rate selection or follow-up creation.
 
-1. Select **Halo appointment manager** in the launcher, enter the exact HTTPS Halo address, and choose **Prepare extension**.
-2. Open the report folder. Load its **extension** subfolder using **Load unpacked** in Edge or Chrome, if permitted by your browser policy. Disable the original extension first.
-3. Sign in to Halo normally, open Calendar, then **Halo appointments**. Read appointments and select exact rows.
-4. Choose **Preview completion**, review IDs/dates/agent/host, acknowledge the changes and type the displayed **COMPLETE count**.
-5. Review each outcome. Save the Markdown or JSON report with its embedded LLM instructions.
+1. Select **Halo appointment manager** in the launcher and enter the exact HTTPS Halo address in **Parameters**.
+2. Open **Install extension** and choose **Copy to C:\extensions**. It prepares the package, creates C:\extensions\HaloAppointmentManager if needed, and shows the exact folder to load. Existing files are preserved; an identical copy is reused and a different existing folder results in a dated sibling. **Open extension folder** opens the destination.
+3. Disable the older extension. Open edge://extensions or chrome://extensions, enable Developer mode if permitted, choose **Load unpacked**, and select the displayed folder containing manifest.json. Copying files does not install or enable it in the browser.
+4. Sign in to Halo normally and refresh Calendar. The **Halo appointments** button appears on that page. Read appointments and select exact rows.
+5. Choose **Preview completion**, review IDs/dates/agent/host, acknowledge the changes and type the displayed **COMPLETE count**.
+6. Review each outcome. Save the Markdown or JSON report with its embedded LLM instructions.
+
+**Prepare extension** remains available for package-only preparation. **Open report folder** opens its timestamped output containing extension\ and halo-appointment-manager.zip. You can also load that extension subfolder directly. After copying, extension-copy.json and extension-copy.md record the actual destination and LLM instructions; they explicitly report that browser installation is manual.
 
 The extension rereads every item before POST, skips changed or ineligible appointments, processes requests sequentially and verifies completion by a subsequent read. It stops on unknown outcomes and never automatically retries a completion POST. **Stop after current item** cannot undo a request already sent. It requires a uniquely named active **Do Not Bill** rate rather than assuming a numeric ID.
 
