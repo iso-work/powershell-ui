@@ -12,7 +12,8 @@ foreach($file in $files) {
     Assert ($errors.Count -eq 0) "Syntax errors: $($file.FullName): $errors"
 }
 $catalog=@(Get-ScriptCatalog $root)
-Assert ($catalog.Count -eq 5) 'Expected four reports and one reviewed Halo extension preparation tool.'
+Assert ($catalog.Count -eq 6) 'Expected five reports and one reviewed Halo extension preparation tool.'
+Assert (@($catalog | Where-Object { $_.Manifest.id -eq 'conditional-access' -and $_.Manifest.auth -eq 'GraphConditionalAccess' -and $_.Manifest.readOnly }).Count -eq 1) 'Conditional Access requires its own read-only authentication profile.'
 foreach($item in $catalog) { Assert ($item.Errors.Count -eq 0) "Adapter integrity: $($item.Name): $($item.Errors)" }
 Assert (@($catalog | Where-Object Path -match 'upstream').Count -eq 0) 'Upstream management scripts must not be exposed.'
 Assert (@($catalog | Where-Object { $_.Manifest.readOnly -ne $true }).Count -eq 1) 'Only the approved Halo browser extension may be write-capable.'
@@ -88,6 +89,8 @@ try {
 & (Join-Path $root 'scripts/IntuneManagement/Test-Adapter.ps1')
 & (Join-Path $root 'scripts/azqr/tests/Test-Wrapper.ps1')
 & (Join-Path $root 'scripts/RebootHistory/Test-Adapter.ps1')
+& (Join-Path $root 'scripts/ConditionalAccess/Test-Adapter.ps1')
+& (Join-Path $root 'scripts/ConditionalAccess/tests/Test-Authentication.ps1')
 & (Join-Path $root 'scripts/HaloAppointmentManager/Test-Adapter.ps1')
 'PASS: launcher syntax, manifest-only discovery, integrity checks, redaction, session cleanup, report roundtrip and partial/failure handling. No live target queries were made.'
 

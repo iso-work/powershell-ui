@@ -26,21 +26,31 @@ function Resolve-LauncherTenant {
     throw 'Enter a tenant GUID or verified DNS tenant domain.'
 }
 function Connect-LauncherGraph {
-    param([hashtable]$Parameters,[hashtable]$Context)
+    param([hashtable]$Parameters,[hashtable]$Context,[ValidateSet('Intune','ConditionalAccess')][string]$Profile='Intune',[switch]$ConsoleSignIn)
     $tenant=Resolve-LauncherTenant ([string]$Parameters.TenantId)
     $client=([guid]$Parameters.ClientId).ToString()
     if([guid]$client -eq [guid]::Empty) { throw 'Enter a non-empty public client application ID.' }
-    $scopes=@('https://graph.microsoft.com/DeviceManagementConfiguration.Read.All','https://graph.microsoft.com/DeviceManagementApps.Read.All')
-    if($Parameters.IncludeDevices) { $scopes+='https://graph.microsoft.com/DeviceManagementManagedDevices.Read.All' }
+    $tokenKey='Graph'
+    if($Profile -eq 'ConditionalAccess') {
+        $tokenKey='GraphConditionalAccess'
+        $scopes=@('Policy.Read.All','Directory.Read.All','RoleManagement.Read.Directory','Agreement.Read.All','CrossTenantInformation.ReadBasic.All','NetworkAccess.Read.All')
+        if($Parameters.IncludeHiddenMembership) { $scopes+='Member.Read.Hidden' }
+        if($Parameters.IncludeFilterContext) { $scopes+=@('CustomSecAttributeDefinition.Read.All','CustomSecAttributeAssignment.Read.All') }
+        $scopes=@($scopes | ForEach-Object {'https://graph.microsoft.com/'+$_})
+    } else {
+        $scopes=@('https://graph.microsoft.com/DeviceManagementConfiguration.Read.All','https://graph.microsoft.com/DeviceManagementApps.Read.All')
+        if($Parameters.IncludeDevices) { $scopes+='https://graph.microsoft.com/DeviceManagementManagedDevices.Read.All' }
+    }
     $scope=$scopes -join ' '
     $key="$tenant|$client|$scope"
-    if($Context.Tokens.ContainsKey('Graph') -and $Context.TokenMetadata.ContainsKey('Graph')) {
-        $metadata=$Context.TokenMetadata.Graph
+    if($Context.Tokens.ContainsKey($tokenKey) -and $Context.TokenMetadata.ContainsKey($tokenKey)) {
+        $metadata=$Context.TokenMetadata[$tokenKey]
         if($metadata.Key -eq $key -and $metadata.Expires -gt [DateTime]::UtcNow.AddMinutes(2)) { return }
     }
     $base="https://login.microsoftonline.com/$tenant/oauth2/v2.0"
     $device=Invoke-RestMethod -Method Post -Uri "$base/devicecode" -Body @{client_id=$client;scope=$scope}
     $Context.Progress.Enqueue("SIGN IN: Open $($device.verification_uri) and enter $($device.user_code). This code expires in $($device.expires_in) seconds.")
+    if($ConsoleSignIn) { Write-Host ("SIGN IN: Open $($device.verification_uri) and enter $($device.user_code).") }
     $deadline=[DateTime]::UtcNow.AddSeconds([int]$device.expires_in)
     $delay=[int]$device.interval
     $token=$null
@@ -64,9 +74,14 @@ function Connect-LauncherGraph {
     foreach($permission in $granted) {
         if($permission.Replace('https://graph.microsoft.com/','') -notin $allowed) { throw 'Unexpected permission in sign-in. Use a dedicated application with only the documented read scopes.' }
     }
-    if($Context.Tokens.ContainsKey('Graph')) { $Context.Tokens.Graph.Dispose() }
-    $Context.Tokens.Graph=ConvertTo-SecureString $token.access_token -AsPlainText -Force
-    $Context.TokenMetadata.Graph=@{Key=$key;Expires=[DateTime]::UtcNow.AddSeconds([int]$token.expires_in)}
+    if($Profile -eq 'ConditionalAccess') {
+        foreach($requiredScope in $scopes) {
+            if($requiredScope.Replace('https://graph.microsoft.com/','') -notin @($granted | ForEach-Object {$_.Replace('https://graph.microsoft.com/','')})) { throw 'Sign-in did not grant the requested read scopes. Check application consent and the optional collection settings.' }
+        }
+    }
+    if($Context.Tokens.ContainsKey($tokenKey)) { $Context.Tokens[$tokenKey].Dispose() }
+    $Context.Tokens[$tokenKey]=ConvertTo-SecureString $token.access_token -AsPlainText -Force
+    $Context.TokenMetadata[$tokenKey]=@{Key=$key;Tenant=$tenant;Client=$client;Profile=$Profile;Scopes=@($granted);Expires=[DateTime]::UtcNow.AddSeconds([int]$token.expires_in)}
     $token=$null; $device=$null
 }
 function Protect-ReportData {
@@ -166,6 +181,7 @@ function Invoke-LauncherAdapter {
     $status='Completed'; $errorMessage=''
     try {
         if($Manifest.ContainsKey('auth') -and $Manifest.auth -eq 'Graph') { Connect-LauncherGraph $Parameters $Context }
+        if($Manifest.ContainsKey('auth') -and $Manifest.auth -eq 'GraphConditionalAccess') { Connect-LauncherGraph $Parameters $Context -Profile ConditionalAccess }
         $result=& $EntryPath -Parameters $Parameters -Context $Context
         if($null -eq $result -or $null -eq $result.Summary -or $null -eq $result.Records) { throw 'Adapter did not return the expected report structure.' }
         if($result.Summary.PSObject.Properties.Name -contains 'Incomplete' -and $result.Summary.Incomplete) { $status='Partial' }

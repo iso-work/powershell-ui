@@ -220,16 +220,17 @@ $list.Add_SelectedIndexChanged({
     if($null -eq $item) { $tabs.TabPages.Remove($installTab); $usage.Clear(); $details.Clear(); $selectedTitle.Text='Choose a report'; $selectedHint.Text='Select a report from the library.'; return }
     $selectedTitle.Text=$item.DisplayName
     $extensionTool=$item.Manifest.ContainsKey('kind') -and $item.Manifest.kind -eq 'browser-extension'
+    $interactiveGraph=$item.Manifest.ContainsKey('auth') -and $item.Manifest.auth -in @('Graph','GraphConditionalAccess')
     if($extensionTool) { if(-not $tabs.TabPages.Contains($installTab)) { $tabs.TabPages.Insert(2,$installTab) } }
     else { $tabs.TabPages.Remove($installTab) }
     $selectedHint.Text=if($extensionTool){'Write-capable Halo extension  ·  Launcher prepares local files only'}else{'Read-only report  ·  '+$item.Name}
     $run.Text=if($extensionTool){'Prepare extension'}else{'Run report'}
-    $memoryNote.Text=if($extensionTool){'Halo sign-in stays in the browser. Close the Halo manager to clear its token cache.'}else{'Read-only collection.'+[Environment]::NewLine+'Credentials stay in this session and are cleared when you exit.'}
+    $memoryNote.Text=if($extensionTool){'Halo sign-in stays in the browser. Close the Halo manager to clear its token cache.'}elseif($interactiveGraph){'Microsoft sign-in starts when you run. Access tokens stay in this session and are cleared when you exit.'}else{'Read-only collection.'+[Environment]::NewLine+'Credentials stay in this session and are cleared when you exit.'}
     if($item.Manifest.ContainsKey('guide')) { Set-LauncherGuide $usage $item.Manifest } else { Set-LauncherTechnicalDetails $usage $item.Usage }
     Set-LauncherTechnicalDetails $details $item.Usage
     if($item.Errors.Count) { Add-GuideParagraph $usage ('Report unavailable: '+($item.Errors -join '; ')) 'heading' }
     $intro=[Windows.Forms.Label]::new(); $intro.AutoSize=$true; $intro.MaximumSize=[Drawing.Size]::new(650,0); $intro.ForeColor=$script:muted; $intro.Margin=[Windows.Forms.Padding]::new(0,0,0,12)
-    $intro.Text=if($extensionTool){'Enter your Halo address. This prepares local extension files only. Sign in to Halo in Edge or Chrome; no Halo password or browser token is handled by this launcher.'}else{'Enter the values below. Required fields define the account or system to read. Enter credentials separately using Session credentials.'}
+    $intro.Text=if($extensionTool){'Enter your Halo address. This prepares local extension files only. Sign in to Halo in Edge or Chrome; no Halo password or browser token is handled by this launcher.'}elseif($interactiveGraph){'Enter your tenant and public client application ID below. Choose Run report, then follow the Microsoft sign-in address and code shown in Status and sign-in.'}else{'Enter the values below. Required fields define the account or system to read. Enter credentials separately using Session credentials.'}
     $fields.Controls.Add($intro)
     foreach($parameter in $item.Parameters) { Add-ParameterCard $parameter }
     Update-ParameterLayout
@@ -379,7 +380,7 @@ $form.Add_FormClosing({Stop-Report})
 Refresh-Catalog
 try {
     if($VerifyUi) {
-        if($list.Items.Count -ne 5) { throw 'Expected four reports and one Halo extension tool.' }
+        if($list.Items.Count -ne 6) { throw 'Expected five reports and one Halo extension tool.' }
         for($index=0;$index -lt $list.Items.Count;$index++) {
             $list.SelectedIndex=$index
             if(-not $run.Enabled -or $script:inputs.Count -eq 0) { throw 'Manifest parameter controls or integrity gate failed.' }
@@ -454,7 +455,7 @@ try {
             $gridTab.Text='Record table'
             $form.ShowInTaskbar=$false; $form.StartPosition='Manual'; $form.Location=[Drawing.Point]::new(-30000,-30000); $form.Opacity=0
             $form.Show(); [Windows.Forms.Application]::DoEvents()
-            foreach($view in @('guide','parameters','compact','reboot-parameters','reboot-table','halo-guide','halo-parameters','halo-install','halo-install-compact')) {
+            foreach($view in @('guide','parameters','compact','reboot-parameters','reboot-table','halo-guide','halo-parameters','halo-install','halo-install-compact','ca-guide','ca-parameters','ca-compact')) {
                 if($view -like 'reboot-*') {
                     $form.Size=[Drawing.Size]::new(1320,930)
                     $list.SelectedIndex=@($list.Items | ForEach-Object {$_.Manifest.id}).IndexOf('windows-reboot-history')
@@ -463,8 +464,12 @@ try {
                     $form.Size=[Drawing.Size]::new(1320,930)
                     $list.SelectedIndex=@($list.Items | ForEach-Object {$_.Manifest.id}).IndexOf('halo-appointment-manager')
                 }
-                $tabs.SelectedTab=if($view -in @('guide','halo-guide')){$usageTab}elseif($view -like 'halo-install*'){$installTab}elseif($view -eq 'reboot-table'){$gridTab}else{$paramTab}
-                if($view -in @('compact','halo-install-compact')) { $form.Size=$form.MinimumSize }
+                if($view -like 'ca-*') {
+                    $form.Size=[Drawing.Size]::new(1320,930)
+                    $list.SelectedIndex=@($list.Items | ForEach-Object {$_.Manifest.id}).IndexOf('conditional-access')
+                }
+                $tabs.SelectedTab=if($view -in @('guide','halo-guide','ca-guide')){$usageTab}elseif($view -like 'halo-install*'){$installTab}elseif($view -eq 'reboot-table'){$gridTab}else{$paramTab}
+                if($view -in @('compact','halo-install-compact','ca-compact')) { $form.Size=$form.MinimumSize }
                 $null=$form.Handle
                 $form.PerformLayout(); $rootLayout.PerformLayout(); $split.PerformLayout(); $content.PerformLayout(); $tabs.PerformLayout(); $fields.PerformLayout()
                 Update-ParameterLayout
@@ -477,7 +482,7 @@ try {
             Show-CredentialDialog -PreviewFile (Join-Path $PreviewPath 'launcher-credentials.png')
             $form.Hide()
         }
-        'PASS: five manifests, formatted guides, bounded parameters, Windows paths, integrity gate, report/table/JSON and actual async extension copy button with current Halo address and manual-install receipt. Copy verification used a temporary folder only.'
+        'PASS: six manifests, formatted guides, bounded parameters, Windows paths, integrity gate, report/table/JSON and actual async extension copy button with current Halo address and manual-install receipt. Copy verification used a temporary folder only.'
     } else { [void]$form.ShowDialog() }
 } finally {
     try {

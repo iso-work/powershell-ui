@@ -1,6 +1,6 @@
 # PowerShell infrastructure reports and tools
 
-Windows desktop launcher for four read-only reporting workflows and one reviewed Halo appointment manager extension. Select a tool, read its purpose and directions, enter parameters, and run it. Results appear as a readable report, a record table, and structured JSON. Every launcher run writes local report.json and report.md, including explicit instructions for an LLM.
+Windows desktop launcher for five read-only reporting workflows and one reviewed Halo appointment manager extension. Select a tool, read its purpose and directions, enter parameters, and run it. Results appear as a readable report, a record table, and structured JSON. Every launcher run writes local report.json and report.md, including explicit instructions for an LLM.
 
 Halo is the explicit write-capable exception: the launcher prepares local extension files, while live appointment completion requires a separate reviewed selection and confirmation inside Halo. Other reports remain read-only.
 
@@ -30,6 +30,7 @@ Windows file paths use backslashes, for example C:\iso-psrepo\tools\azqr.exe. We
 | IntuneManagement: read-only inventory | Read configuration/compliance policies, applications, settings catalog metadata, and optional safe device inventory | Tenant ID and public-client application ID, interactive Microsoft sign-in, Intune licensing and read permissions |
 | Azure Quick Review | Read Azure resource inventory and assessment findings for one subscription, optionally one resource group | Tenant ID, subscription ID, an Azure application session credential (application ID and secret), application with Reader role, verified AZQR 4.2.0 binary |
 | Reboot history | Show Windows starts, Intentional/Unintentional/Uncertain classifications and nearby System-log errors | Localhost or one remote Windows machine; System event log read permission; optional Directory account session credential for remote reads |
+| Conditional Access | Export all nondeleted policies and referenced locations, groups/nested members, users, roles, applications and controls for human/LLM review | Tenant, public client application ID, interactive Microsoft sign-in and documented delegated read permissions |
 | Halo appointment manager | Prepare an Edge/Chrome extension for human-confirmed completion of multiple appointments | Exact HTTPS Halo site; normal signed-in browser session; Halo completion permission; unique active Do Not Bill rate |
 
 Each scripts\<tool>\directions.txt explains its purpose, exact inputs, permissions, output and limitations. Each launcher.json supplies the name, purpose, formatted guide and typed controls. Source copies live in each tool's upstream directory, with pinned provenance in UPSTREAM.json.
@@ -39,6 +40,24 @@ CleanupMonster and IntuneManagement upstream applications include write operatio
 AD computer audit does not reproduce every CleanupMonster selection rule. Intune inventory does not include assignments, effective policy, settings catalog settings, scripts, or every upstream object type. Directions and report limitations state this explicitly.
 
 Reboot history defaults to 30 days and the latest 50 starts. It opens a compact history table automatically and retains complete evidence in JSON. It checks Critical/Error events within 10 minutes before and after each start, adjustable to 1-60 minutes. Only retained System events are read; a missing request remains Uncertain, conflicting evidence is not forced into a binary classification, and nearby errors are not proof of a reboot's cause. Starts include power-on after shutdown; fallback service starts are explicitly unconfirmed. It never restarts a machine or changes its event logging, services, firewall or remote-access settings. See scripts\RebootHistory\directions.txt for the classification rules and collection limits.
+
+## Conditional Access
+
+Select **Conditional Access**, enter the tenant domain/GUID and a dedicated public client application ID, and choose **Run report**. Follow Microsoft's device-code sign-in in the status pane. No Graph SDK is required. The app must already allow public-client/device-code flow and have administrator-consented delegated read scopes; the collector does not create the app or change consent/roles.
+
+Always requested: **Policy.Read.All**, **Directory.Read.All**, **RoleManagement.Read.Directory**, **Agreement.Read.All**, **CrossTenantInformation.ReadBasic.All** and **NetworkAccess.Read.All**. Defaults additionally request **Member.Read.Hidden** for hidden groups and **CustomSecAttributeDefinition.Read.All** / **CustomSecAttributeAssignment.Read.All** for filter context. The signed-in reader needs the matching directory/attribute/hidden-member permissions as well. See [complete directions](scripts/ConditionalAccess/directions.txt) for prerequisites and limitations. Tokens are cached separately from Intune and cleared with the launcher session.
+
+The export includes enabled, disabled and report-only policies, full returned conditions/grant/session controls, explicit include/exclude reference paths, named locations, direct/transitive group membership and owners, user/application identities, role definitions and assignment/eligibility context, authentication contexts/strengths, terms-of-use files and supported Global Secure Access profile/rule details. Group traversal is cached and paginated. Missing permissions, failed pages, limited information, unknown references and safety limits are retained as coverage gaps.
+
+**conditional-access.json** is a self-contained linked JSON export with LLM instructions: join Policies[].References[].ObjectKey to Objects[].Key. **conditional-access.md** is a readable overview of policies, named locations and group membership. Standard report.json/report.md and the launcher table/JSON retain policy and object records. No data is automatically sent to an LLM.
+
+Policy reads default to Graph beta for newer fields. Stable policy mode is available but explicitly incomplete for beta-only fields; group membership and selected supporting reads still use beta. Microsoft-defined selectors remain symbolic. Filters are exported with candidate data and are never executed or reported as effective-access matches. Legacy MFA trusted-IP settings and custom authentication-factor definitions require separate verification when referenced. Soft-deleted policies, sign-in logs, user method enrollment and terms acceptance history are outside scope. This is a configuration snapshot, not a sign-in simulator, complete security audit or Secure Score calculation.
+
+Command-line use from the repository root:
+
+    pwsh -File .\scripts\ConditionalAccess\Export-ConditionalAccess.ps1 -TenantId contoso.onmicrosoft.com -ClientId <public-client-guid>
+
+Replace the example tenant and client ID. The helper prints the sign-in code, uses the same registered adapter, and clears its in-memory session on completion. No live tenant was queried or changed during development; tests use synthetic responses.
 
 ## Halo appointment manager
 
@@ -113,7 +132,7 @@ Output location can be changed:
 
     pwsh -STA -File .\Start-PowerShellUI.ps1 -OutputRoot D:\Reports
 
-Cancellation cannot undo work already performed. The four reports collect target data and write requested local artifacts. Halo preparation also writes only local files; confirmed live appointment completion occurs separately in the browser.
+Cancellation cannot undo work already performed. The five reports collect target data and write requested local artifacts. Halo preparation also writes only local files; confirmed live appointment completion occurs separately in the browser.
 
 ## Source snapshots and GitHub
 

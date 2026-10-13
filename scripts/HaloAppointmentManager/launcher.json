@@ -54,7 +54,7 @@
       "A browser-downloaded Markdown report and optional JSON, both with explicit LLM processing instructions."
     ],
     "notes": [
-      "This is the explicit write-capable exception. The other four reports remain read-only.",
+      "This is the explicit write-capable exception. The other reports remain read-only.",
       "No delete, experimental edit, billing-rate selection or follow-up creation is exposed.",
       "Changed items are skipped. Unverified or unknown outcomes stop the batch and are not automatically retried.",
       "Halo sign-in stays in the browser. Closing this PowerShell launcher does not clear a separate browser session.",
