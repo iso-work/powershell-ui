@@ -6,7 +6,6 @@ $ErrorActionPreference='Stop'
 $packages=@{
  'Microsoft.Graph.Authentication'='2.41.2'
  'ExchangeOnlineManagement'='3.10.1'
- 'Az.Accounts'='3.0.0'
  'Microsoft.Online.SharePoint.PowerShell'='16.0.27709.12000'
 }
 $repository=Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue

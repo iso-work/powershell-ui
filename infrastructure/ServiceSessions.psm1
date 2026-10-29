@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 # This module does not offer an arbitrary PowerShell/script invocation interface.
 $script:ServiceOperations=@{
     ExchangeOnline=@('ExchangeConfiguration')
-    Azure=@('AzureSubscriptions')
+
     SharePointOnline=@('SharePointSites')
 }
 
@@ -57,10 +57,7 @@ $script:PrepareServiceRunspace={
                 if($connections.Count -ne 1) { throw 'Expected one retained Exchange connection.' }
                 $actual=[string]$connections[0].TenantID
             }
-            Azure {
-                $current=Get-AzContext -ErrorAction Stop
-                $actual=[string]$current.Tenant.Id
-            }
+            
             SharePointOnline {
                 # All SPO commands in this private runspace use the specific admin
                 # endpoint whose unauthenticated realm was verified before login.
@@ -81,10 +78,7 @@ $script:PrepareServiceRunspace={
     function Disconnect-ThisService {
         switch($script:LauncherService) {
             ExchangeOnline { if(Get-Command Disconnect-ExchangeOnline -ErrorAction SilentlyContinue) { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue } }
-            Azure {
-                if(Get-Command Disconnect-AzAccount -ErrorAction SilentlyContinue) { Disconnect-AzAccount -Scope Process -ErrorAction SilentlyContinue | Out-Null }
-                if(Get-Command Clear-AzContext -ErrorAction SilentlyContinue) { Clear-AzContext -Scope Process -Force -ErrorAction SilentlyContinue | Out-Null }
-            }
+            
             SharePointOnline {
                 if(Get-Command Disconnect-SPOService -ErrorAction SilentlyContinue) { Disconnect-SPOService -ErrorAction SilentlyContinue }
                 # Shut down only the compatibility process owned by this service runspace.
@@ -104,14 +98,7 @@ $script:PrepareServiceRunspace={
             if($account) { $connect.UserPrincipalName=$account }
             Connect-ExchangeOnline @connect
         }
-        Azure {
-            Import-Module Az.Accounts -MinimumVersion 3.0.0 -ErrorAction Stop
-            Disable-AzContextAutosave -Scope Process -ErrorAction Stop | Out-Null
-            Update-AzConfig -EnableLoginByWam $false -EnableErrorRecordsPersistence $false -EnableDataCollection $false -Scope Process -ErrorAction Stop | Out-Null
-            $connect=@{Tenant=$tenantId;Scope='Process';SkipContextPopulation=$true;ErrorAction='Stop'}
-            if($account) { $connect.AccountId=$account }
-            Connect-AzAccount @connect | Out-Null
-        }
+        
         SharePointOnline {
             $uri=$null
             if(-not [uri]::TryCreate($adminUrl,[UriKind]::Absolute,[ref]$uri) -or $uri.Scheme -ne 'https' -or $uri.Port -ne 443 -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or
@@ -153,10 +140,7 @@ $script:ReadServiceRunspace={
                 (Get-ReadCollection 'OutboundConnectors' { Get-OutboundConnector -ErrorAction Stop | Select-Object Identity,Name,Enabled,ConnectorType,RecipientDomains,SmartHosts,UseMXRecord,TlsSettings,TlsDomain,RouteAllMessagesViaOnPremises })
             )
         }
-        AzureSubscriptions {
-            if($script:LauncherService -ne 'Azure') { throw 'Operation is not allowed for this service.' }
-            $collections=@((Get-ReadCollection 'Subscriptions' { Get-AzSubscription -TenantId $script:LauncherTenantId -ErrorAction Stop | Select-Object Id,Name,TenantId,State }))
-        }
+        
         SharePointSites {
             if($script:LauncherService -ne 'SharePointOnline') { throw 'Operation is not allowed for this service.' }
             $collections=@(
@@ -185,7 +169,7 @@ function Connect-LauncherService {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][hashtable]$Context,
-        [Parameter(Mandatory)][ValidateSet('ExchangeOnline','Azure','SharePointOnline')][string]$Service
+        [Parameter(Mandatory)][ValidateSet('ExchangeOnline','SharePointOnline')][string]$Service
     )
     $tenantId=Get-ServiceTenant $Context
     Initialize-LauncherServiceSessions $Context
@@ -221,7 +205,7 @@ function Invoke-LauncherServiceRead {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][hashtable]$Context,
-        [Parameter(Mandatory)][ValidateSet('ExchangeOnline','Azure','SharePointOnline')][string]$Service,
+        [Parameter(Mandatory)][ValidateSet('ExchangeOnline','SharePointOnline')][string]$Service,
         [Parameter(Mandatory)][string]$Operation
     )
     if($Operation -notin $script:ServiceOperations[$Service]) { throw 'Only the registered read operation is permitted for this service.' }
@@ -250,7 +234,7 @@ function Get-LauncherServiceStatus {
 
 function Disconnect-LauncherServices {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][hashtable]$Context,[ValidateSet('ExchangeOnline','Azure','SharePointOnline')][string[]]$Service=@('ExchangeOnline','Azure','SharePointOnline'))
+    param([Parameter(Mandatory)][hashtable]$Context,[ValidateSet('ExchangeOnline','SharePointOnline')][string[]]$Service=@('ExchangeOnline','SharePointOnline'))
     if(-not $Context.ContainsKey('Services')) { return }
     foreach($name in $Service) {
         if(-not $Context.Services.ContainsKey($name)) { continue }

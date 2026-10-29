@@ -10,7 +10,7 @@ function Initialize-M365Session {
     if(-not $Context.ContainsKey('Tenant')) { $Context.Tenant=[hashtable]::Synchronized(@{Id='';Domain='';DisplayName='';Account='';SharePointAdminUrl=''}) }
     if(-not $Context.ContainsKey('Services')) { $Context.Services=[hashtable]::Synchronized(@{}) }
     if(-not $Context.ContainsKey('SharedGraph')) {
-        $Context.SharedGraph=[hashtable]::Synchronized(@{Ready=$false;TenantId='';Account='';ClientId='';Generation=[guid]::NewGuid().ToString();Runspace=$null;Gate=[object]::new();Scopes=@();LastError='';ActiveWorker=$null})
+        $Context.SharedGraph=[hashtable]::Synchronized(@{Ready=$false;TenantId='';Account='';IdentityAccount='';ClientId='';Generation=[guid]::NewGuid().ToString();Runspace=$null;Gate=[object]::new();Scopes=@();ScopeKey='';AdditionalGrantedScopes=@();LastError='';ActiveWorker=$null})
     }
 }
 function Get-M365AllowedReadScopes {
@@ -40,9 +40,9 @@ function Invoke-M365Worker {
 function Assert-M365ReadContext {
     param($Context,$GraphContext)
     if(-not $Context.SharedGraph.Ready -or $null -eq $GraphContext -or $GraphContext.TenantId -ne $Context.SharedGraph.TenantId -or
-        $GraphContext.Account -ne $Context.SharedGraph.Account -or $GraphContext.ClientId -ne $Context.SharedGraph.ClientId -or $GraphContext.ContextScope -ne 'Process') { throw 'Microsoft 365 session changed. Sign in again before collecting data.' }
-    $allowed=@(Get-M365AllowedReadScopes)
-    foreach($scope in $GraphContext.Scopes) { if($scope -notin $allowed) { throw 'This connection has permissions outside the reviewed read-only profile. Use a dedicated reader application.' } }
+        [string]$GraphContext.Account -ne $Context.SharedGraph.IdentityAccount -or $GraphContext.ClientId -ne $Context.SharedGraph.ClientId -or $GraphContext.ContextScope -ne 'Process') { throw 'Microsoft 365 session changed. Sign in again before collecting data.' }
+    $scopeKey=(@($GraphContext.Scopes | ForEach-Object {([string]$_).ToLowerInvariant()} | Sort-Object -Unique)) -join ' '
+    if($scopeKey -cne $Context.SharedGraph.ScopeKey){throw 'Microsoft 365 permissions changed after login. Sign in again.'}
 }
 function Connect-M365Session {
     [CmdletBinding()]
@@ -61,36 +61,57 @@ function Connect-M365Session {
     if($Context.Services.Count){Disconnect-LauncherServices $Context}
     foreach($key in @($Context.Tenant.Keys)){$Context.Tenant[$key]=''}
     $Context.SharedGraph.Ready=$false
+    $phase=[hashtable]::Synchronized(@{Stage='Loading Microsoft authentication module'})
     try {
         $result=@(Invoke-M365Worker $Context {
-            param($tenant,$client,$scopes,$discover)
+            param($tenant,$client,$scopes,$discover,$phase)
+            $ErrorActionPreference='Stop'
             Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
             if(Get-MgContext) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
             if($client -and (Get-Command Set-MgGraphOption).Parameters.ContainsKey('DisableLoginByWAM')) { Set-MgGraphOption -DisableLoginByWAM $true }
             $connect=@{TenantId=$(if($discover){'organizations'}else{$tenant});Scopes=$scopes;ContextScope='Process';NoWelcome=$true;ErrorAction='Stop'}
             if($client) { $connect.ClientId=$client }
+            $phase.Stage='Microsoft sign-in'
             Connect-MgGraph @connect | Out-Null
+            $phase.Stage='Tenant discovery'
             $identity=Get-MgContext
+            if($null -eq $identity){throw 'Microsoft did not return an authenticated session.'}
             $organization=Invoke-MgGraphRequest -Method GET -Uri 'https://graph.microsoft.com/v1.0/organization?$select=id,displayName,verifiedDomains' -OutputType PSObject
+            if($organization -is [string]){$organization=$organization | ConvertFrom-Json}
             $orgs=@($organization.value)
             if($orgs.Count -ne 1 -or $orgs[0].id -ne $identity.TenantId) { throw 'Tenant identity could not be verified.' }
             $domainNames=@($orgs[0].verifiedDomains | ForEach-Object {$_.name})
             if(-not $discover -and $tenant -ne $identity.TenantId -and $tenant -notin $domainNames) { throw 'The selected account belongs to a different target tenant.' }
-            [pscustomobject]@{Identity=$identity;Organization=$orgs[0]}
-        } @($tenant,$ClientId,$scopes,$discover))
+            $account=[string]$identity.Account
+            if(-not $account){$me=Invoke-MgGraphRequest -Method GET -Uri 'https://graph.microsoft.com/v1.0/me?$select=id,userPrincipalName,displayName' -OutputType PSObject;$account=[string]$me.userPrincipalName}
+            if(-not $account){throw 'Signed-in username could not be resolved.'}
+            [pscustomobject]@{Identity=$identity;Organization=$orgs[0];Account=$account}
+        } @($tenant,$ClientId,$scopes,$discover,$phase))
+        $phase.Stage='Session validation'
         $identity=$result[-1].Identity;$org=$result[-1].Organization
-        $Context.SharedGraph.TenantId=$identity.TenantId;$Context.SharedGraph.Account=$identity.Account;$Context.SharedGraph.ClientId=$identity.ClientId
-        $Context.SharedGraph.Scopes=@($identity.Scopes);$Context.SharedGraph.Generation=[guid]::NewGuid().ToString();$Context.SharedGraph.Ready=$true
-        Assert-M365ReadContext $Context $identity
+        $Context.SharedGraph.TenantId=$identity.TenantId;$Context.SharedGraph.Account=$result[-1].Account;$Context.SharedGraph.IdentityAccount=[string]$identity.Account;$Context.SharedGraph.ClientId=$identity.ClientId
+        $Context.SharedGraph.Scopes=@($identity.Scopes);$Context.SharedGraph.ScopeKey=(@($identity.Scopes | ForEach-Object {([string]$_).ToLowerInvariant()} | Sort-Object -Unique)) -join ' '
+        $Context.SharedGraph.AdditionalGrantedScopes=@($identity.Scopes | Where-Object {$_ -notin @(Get-M365AllowedReadScopes)})
         $domain=@($org.verifiedDomains | Where-Object isInitial | Select-Object -First 1)
         $initialDomain=if($domain.Count){$domain[0].name}else{''}
-        $Context.Tenant.Id=$identity.TenantId;$Context.Tenant.Domain=$initialDomain;$Context.Tenant.DisplayName=$org.displayName;$Context.Tenant.Account=$identity.Account
+        $Context.Tenant.Id=$identity.TenantId;$Context.Tenant.Domain=$initialDomain;$Context.Tenant.DisplayName=$org.displayName;$Context.Tenant.Account=$result[-1].Account
         $Context.Tenant.SharePointAdminUrl=if($initialDomain -match '^([a-zA-Z0-9-]+)\.onmicrosoft\.com$'){'https://'+$Matches[1]+'-admin.sharepoint.com'}else{''}
         $Context.SharedGraph.LastError=''
-        return [pscustomobject]@{TenantId=$identity.TenantId;Tenant=$org.displayName;Domain=$initialDomain;Account=$identity.Account;Scopes=@($identity.Scopes);Ready=$true}
+        $Context.SharedGraph.Generation=[guid]::NewGuid().ToString();$Context.SharedGraph.Ready=$true
+        Assert-M365ReadContext $Context $identity
+        return [pscustomobject]@{TenantId=$identity.TenantId;Tenant=$org.displayName;Domain=$initialDomain;Account=$result[-1].Account;Scopes=@($identity.Scopes);Ready=$true}
     } catch {
+        $failure=$_;$http=0;$exception=$failure.Exception
+        for($i=0;$null -ne $exception -and $i -lt 6;$i++){
+            try{if($exception.Response.StatusCode){$http=[int]$exception.Response.StatusCode}}catch{}
+            try{if($exception.ResponseStatusCode){$http=[int]$exception.ResponseStatusCode}}catch{}
+            $exception=$exception.InnerException
+        }
+        $aad=[regex]::Match([string]$failure,'AADSTS[0-9]+').Value
         Disconnect-M365Session $Context
-        $Context.SharedGraph.LastError='Sign-in failed. Check the target tenant, application consent, installed Graph.Authentication module and tenant access policy. No data was collected.'
+        foreach($key in @($Context.Tenant.Keys)){$Context.Tenant[$key]=''}
+        $details=if($http){' HTTP '+$http+'.'}elseif($aad){' '+$aad+'.'}else{''}
+        $Context.SharedGraph.LastError=$phase.Stage+' failed.'+$details+' '+$(if($phase.Stage -eq 'Tenant discovery'){'Microsoft sign-in completed, but the account/tenant details could not be read. Check organization read access and retry.'}else{'Check Microsoft sign-in, module prerequisites and application/tenant access policy.'})+' Reports remain locked.'
         throw $Context.SharedGraph.LastError
     }
 }
@@ -102,13 +123,26 @@ function Invoke-M365GraphRequest {
     if(-not [uri]::TryCreate($Uri,[UriKind]::Absolute,[ref]$parsed) -or $parsed.Scheme -ne 'https' -or $parsed.Host -ne 'graph.microsoft.com' -or $parsed.Port -ne 443 -or $parsed.UserInfo -or $parsed.Fragment -or
         $parsed.AbsolutePath -notmatch '^/(v1\.0|beta)/(organization|me|identity/conditionalAccess|groups|users|devices|servicePrincipals|applications|directoryObjects|directory/|roleManagement/directory|policies/|identityGovernance/termsOfUse|tenantRelationships/|networkAccess/|deviceManagement/|deviceAppManagement/|security/|reports/|auditLogs/)' -or $Uri -match '(^|/)\.\.(/|$)') { throw 'Only reviewed Microsoft Graph read endpoints are allowed.' }
     if(-not $Context.SharedGraph.Ready) { throw 'Choose Login to 365 before running this report.' }
-    $values=@(Invoke-M365Worker $Context {
-        param($uri,$tenant,$account,$client,$allowed)
+    try {$values=@(Invoke-M365Worker $Context {
+        param($uri,$tenant,$account,$client,$scopeKey)
         $identity=Get-MgContext
-        if($null -eq $identity -or $identity.TenantId -ne $tenant -or $identity.Account -ne $account -or $identity.ClientId -ne $client -or $identity.ContextScope -ne 'Process') { throw 'The Microsoft Graph identity changed. Sign in again.' }
-        foreach($scope in $identity.Scopes) { if($scope -notin $allowed) { throw 'A non-reader Graph permission was detected.' } }
+        if($null -eq $identity -or $identity.TenantId -ne $tenant -or [string]$identity.Account -ne $account -or $identity.ClientId -ne $client -or $identity.ContextScope -ne 'Process') { throw 'The Microsoft Graph identity changed. Sign in again.' }
+        $currentKey=(@($identity.Scopes | ForEach-Object {([string]$_).ToLowerInvariant()} | Sort-Object -Unique)) -join ' '
+        if($currentKey -cne $scopeKey){throw 'Microsoft Graph permissions changed after login. Sign in again.'}
         Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject -Headers @{Prefer='include-unknown-enum-members'} -ErrorAction Stop
-    } @($Uri,$Context.SharedGraph.TenantId,$Context.SharedGraph.Account,$Context.SharedGraph.ClientId,(@(Get-M365AllowedReadScopes))))
+    } @($Uri,$Context.SharedGraph.TenantId,$Context.SharedGraph.IdentityAccount,$Context.SharedGraph.ClientId,$Context.SharedGraph.ScopeKey))} catch {
+        $invalid=[string]$_ -match 'identity changed|permissions changed'
+        # Runspace/PowerShell invocation wraps SDK HTTP exceptions. Inspect the
+        # bounded inner chain so expired authentication also locks the launcher.
+        $exception=$_.Exception
+        for($i=0;$null -ne $exception -and $i -lt 6;$i++){
+            try{if([int]$exception.Response.StatusCode -eq 401){$invalid=$true}}catch{}
+            try{if([int]$exception.ResponseStatusCode -eq 401){$invalid=$true}}catch{}
+            $exception=$exception.InnerException
+        }
+        if($invalid){$Context.SharedGraph.Ready=$false;$Context.SharedGraph.LastError='Microsoft 365 session expired or changed. Please login to 365 again.'}
+        throw
+    }
     if($values.Count -ne 1) { throw 'Graph did not return a single JSON response.' }
     return $values[0]
 }
@@ -214,6 +248,6 @@ function Disconnect-M365Session {
         try{$graph.Runspace.Close();$graph.Runspace.Dispose()}catch{}
         $graph.Runspace=$null
     }
-    $graph.TenantId='';$graph.Account='';$graph.ClientId='';$graph.Scopes=@()
+    $graph.TenantId='';$graph.Account='';$graph.IdentityAccount='';$graph.ClientId='';$graph.Scopes=@();$graph.ScopeKey='';$graph.AdditionalGrantedScopes=@()
 }
 Export-ModuleMember Get-M365ReadScopes,Initialize-M365Session,Connect-M365Session,Invoke-M365GraphRequest,Invoke-M365GraphRead,Find-M365ReaderApplication,Register-M365ReaderApplication,Disconnect-M365Session

@@ -1,11 +1,3 @@
-CURRENT LAUNCHER AUTHENTICATION
-Choose Login to 365 once, verify the customer tenant, then run this report.
-Tenant/application IDs are supplied by the shared Graph SDK session. Enable
-Extended reads for Intune or optional CA references. The GUI uses normal Microsoft
-login windows, not device codes. SDK tokens renew in process when permitted.
-See docs\M365-Session-Guide.md; it supersedes older device-code/setup text below.
-App registration is a separately confirmed setup action, never a report side effect.
-
 INTUNEMANAGEMENT - READ-ONLY INVENTORY
 
 PURPOSE
@@ -14,7 +6,11 @@ This report helps a user or LLM understand the Intune configuration profiles, co
 This folder contains a custom scoped reporting adapter. The upstream project is a full management application with import, delete, copy and other write operations. Its source copy is retained in upstream\ for reference and license provenance. The launcher runs Invoke-Report.ps1, never the upstream Start-IntuneManagement.ps1 or its full GUI.
 
 REQUIREMENTS AND SIGN-IN
-Use an existing Microsoft Entra public-client app registration in the target tenant. Device-code authentication must be permitted by that app and tenant policy (Authentication > Allow public client flows). An administrator must separately grant the required delegated Microsoft Graph read permissions and any necessary consent before use. The launcher does not create or modify app registrations, grant consent or alter tenant settings.
+Windows, PowerShell 7 and the Microsoft.Graph.Authentication module are required. Install missing supported modules with the separate local dependency installer: pwsh -File .\infrastructure\Install-M365Dependencies.ps1. HTTPS access to Microsoft login and public Microsoft Graph is required.
+
+Select Extended read permissions before Login to 365 for Intune collection. Complete Microsoft's normal login window, including required MFA. The launcher discovers your username and tenant and keeps those details in memory; reports remain locked until this succeeds. No username, tenant ID, application ID or device code is required in this report's parameters. The default Microsoft Graph PowerShell client does not require a new custom app.
+
+Advanced / switch customer allows an optional customer target or reviewed public client ID. Find reader app searches without changes. Register reader app is a separate setup action requiring explicit confirmation and is never performed by this report. An administrator must review delegated read consent and reader roles separately. Registration does not automatically grant tenant-wide consent or assign roles. See docs\M365-Session-Guide.md.
 
 Required delegated permissions:
   DeviceManagementConfiguration.Read.All
@@ -22,17 +18,17 @@ Required delegated permissions:
 Optional only when Include managed device inventory is selected:
   DeviceManagementManagedDevices.Read.All
 
-Use an app and user with read-only authorization. Do not add ReadWrite permissions. The tenant must have an active Intune license, and the user must have adequate Intune role and scope-tag visibility. Authentication is interactive device-code sign-in and supports MFA as allowed by tenant policy. No username/password flow or client secret is needed. The launcher requests the explicit delegated read scopes rather than .default.
+The tenant must have an active Intune license, and the user must have adequate Intune role and scope-tag visibility. Select Extended read permissions before login to request the Intune reads; Include managed device inventory selects collection, not separate authentication or consent. The launcher requests reviewed delegated read scopes for reports. SDK tokens can reflect existing consent on the selected client, but reporting still enforces fixed read operations. Do not add write permissions just to run this inventory.
 
-The launcher's session vault holds the Graph token as SecureString in memory and reuses the session when applicable. No credentials are stored in this adapter, directions, JSON manifest or report. The adapter briefly creates an Authorization header in memory solely for HTTPS requests and clears its reference afterward. The launcher clears its credential/session vault on exit. Signing out of the launcher does not remove independent browser or Windows sign-in sessions.
+Intune and the other Graph reports reuse the shared Graph SDK worker, bound to the verified account, tenant, application and permission context. Authentication is process scoped; SDK token renewal can avoid extra prompts when Microsoft policy permits. No credentials or bearer tokens are stored in this adapter, directions, manifest or report. Logout / clear session, switching customer or closing the launcher disconnects its app-owned sessions and disposes credentials and tokens. Independent Microsoft/browser/Windows sessions are separate.
 
 PARAMETERS AND RUNNING
-1. Select Intune configuration in the launcher and read Start here.
-2. Enter Tenant ID or verified tenant domain (for example contoso.onmicrosoft.com).
-3. Enter the public client application ID (the app registration's Application (client) ID).
-4. Optionally select Include managed device inventory.
-5. Run the report, complete the Microsoft device-code sign-in shown by the launcher, and wait for collection to finish.
-6. Review Summary and Records in the results UI. Open the generated report from the output location shown by the launcher.
+1. Open Start-Launcher.cmd, select Extended read permissions and choose Login to 365.
+2. Complete normal Microsoft sign-in. Verify Logged in as and the displayed customer tenant before collecting data; reports unlock after account/tenant discovery succeeds.
+3. Select Intune configuration and read Purpose and directions, then open Parameters.
+4. Optionally select Include managed device inventory. No account, tenant or application fields are required per report.
+5. Choose Run report and wait for collection using the existing session. Microsoft may require another normal login if access policy or session expiry requires it.
+6. Review Report and Record table in the results UI. Use Open report folder for report.md and report.json, including their summary, collection statuses, limitations and LLM processing instructions.
 
 WHAT IS READ
 HTTPS GET requests only to the following fixed Microsoft Graph collections:

@@ -1,11 +1,3 @@
-CURRENT LAUNCHER AUTHENTICATION
-Choose Login to 365 once, verify the customer tenant, then run this report.
-Tenant/application IDs are supplied by the shared Graph SDK session. Enable
-Extended reads for Intune or optional CA references. The GUI uses normal Microsoft
-login windows, not device codes. SDK tokens renew in process when permitted.
-See docs\M365-Session-Guide.md; it supersedes older device-code/setup text below.
-App registration is a separately confirmed setup action, never a report side effect.
-
 CONDITIONAL ACCESS -- READ-ONLY POLICIES AND REFERENCED OBJECTS
 
 Purpose
@@ -20,34 +12,44 @@ Explicit reference paths distinguish inclusion from exclusion. This is a linked
 configuration snapshot, not an effective-access/sign-in simulation or Secure Score.
 
 Use the launcher
-1. Open Start-Launcher.cmd and choose Conditional Access.
-2. Read Start here, then open Parameters.
-3. Enter the tenant GUID or verified tenant domain, and a dedicated public client
-   application GUID. Use your own tenant/app; no IDs are hardcoded for a real user.
+1. Open Start-Launcher.cmd. Select Extended read permissions for the fullest
+   supporting-reference coverage, then choose Login to 365.
+2. Complete Microsoft's normal login window, including required MFA. The launcher
+   discovers your username and tenant; reports unlock only after that succeeds.
+   Verify Logged in as and the displayed customer tenant before collecting data.
+3. Choose Conditional Access, read Purpose and directions, then open Parameters.
+   No username, tenant ID, application ID or device code is needed for this report.
 4. Keep hidden membership, filter context and newer policy fields enabled for the
    fullest supported export. Their additional permissions are described below.
-5. Choose Run report. Status and sign-in displays Microsoft's sign-in address and
-   one-time code. Sign in with the authorized read account; MFA and Conditional
-   Access still apply. Do not bypass a tenant policy that blocks device-code flow.
+5. Choose Run report. It reuses the shared Graph SDK session and verified tenant.
+   Microsoft may require another normal login when session or tenant policy does.
 6. Review Record table. Policies appear first, followed by referenced objects.
    Pay attention to State and Read / resolution. Report and JSON retain details.
 7. Open report folder. Use conditional-access.json as the self-contained LLM file.
    conditional-access.md provides a readable policy/location/group overview.
 
 Requirements and application setup
-Windows and PowerShell 7 for the GUI. The standalone helper uses PowerShell 7.
+Windows, PowerShell 7 and the Microsoft.Graph.Authentication module for the GUI.
+Install missing supported modules with the separate local dependency installer:
+pwsh -File .\infrastructure\Install-M365Dependencies.ps1
 HTTPS access to login.microsoftonline.com and graph.microsoft.com is required.
-No Microsoft Graph PowerShell SDK or downloaded executable is needed.
 Only the public Microsoft cloud is implemented, not sovereign Graph endpoints.
 
-Use an Entra public client app with device-code/public-client flow enabled and
-delegated Microsoft Graph read permissions already consented by an authorized
-administrator. Configure it through the normal administration process; this
-tool never registers an application, grants consent or assigns a role.
+The normal login uses the Microsoft Graph PowerShell client and discovers account
+and tenant details automatically. A custom app is optional, not a per-report field.
+Advanced / switch customer accepts an explicit customer target or reviewed public
+client ID when needed for MSP work. See docs\M365-Session-Guide.md.
 
-Always requested read scopes:
+Find reader app searches without changes. Register reader app is a separate setup
+action requiring explicit confirmation; it is never performed by this report.
+An administrator must review delegated read consent and reader roles separately.
+Registration does not automatically grant tenant-wide consent or assign roles.
+
+Core login read permissions used by Conditional Access:
 - Policy.Read.All: CA policies, locations and authentication context/strength.
 - Directory.Read.All: referenced groups, users, devices and application identities.
+
+Extended read permissions adds supporting-reference access, including:
 - RoleManagement.Read.Directory: role definitions, active assignments and PIM
   assignment/eligibility schedule instances.
 - Agreement.Read.All: referenced terms-of-use configuration and files.
@@ -55,10 +57,10 @@ Always requested read scopes:
 - NetworkAccess.Read.All: supported referenced Global Secure Access filtering
   profiles, linked policies and rules.
 
-When Read hidden group membership is enabled (default):
+For Read hidden group membership (enabled by default):
 - Member.Read.Hidden.
 
-When Include candidate data for policy filters is enabled (default):
+For Include candidate data for policy filters (enabled by default):
 - CustomSecAttributeDefinition.Read.All.
 - CustomSecAttributeAssignment.Read.All.
 
@@ -72,28 +74,34 @@ roles/scoping. A broad ordinary directory reader does not automatically see them
 Have your administrator delegate the required read access; do not grant write
 permissions just to run this report. Denied supporting reads are recorded.
 
-Sign-in rejects unexpected or write scopes and requires all requested read scopes.
-If optional scopes are unavailable, explicitly disable their checkbox and expect
-partial coverage when those data are needed. Do not reuse an unrelated app with
-broad additional consent. No password, secret or token belongs in Parameters.
+Select Extended read permissions before login to request the supporting reads.
+Report checkboxes select data to collect; they do not start separate authentication
+or grant consent. Missing supporting access is recorded as incomplete coverage.
+SDK tokens can reflect existing consent on the selected client; the launcher still
+enforces fixed reader operations and does not request write scopes for reports.
+No password, secret or token belongs in Parameters or report files.
 
 Parameters
-TenantId: nonempty tenant GUID or verified DNS tenant domain.
-ClientId: nonempty application/client GUID.
-IncludeHiddenMembership: Boolean, default true. Requests hidden membership access.
+The GUI supplies the verified account, tenant and application from its session.
+IncludeHiddenMembership: Boolean, default true. Reads hidden membership when the
+  shared session and user have the necessary permission and role.
 IncludeFilterContext: Boolean, default true. Collects candidate device/app data
-  when a corresponding filter exists; requests the two custom-attribute scopes.
+  when a corresponding filter exists; custom-attribute reads need Extended read
+  permissions and the appropriate user roles.
 UseBetaPolicies: Boolean, default true. Includes newer policy fields through beta.
   If false, policy reads use v1.0 and the export is labelled incomplete for
   beta-only fields. Group membership and selected supporting reads still use beta.
-MaxMinutes: integer 1-1440, default 180. Bounds collection work. Token expiry may
-  require a new run/sign-in before a long budget is exhausted.
+MaxMinutes: integer 1-1440, default 180. Bounds collection work. The SDK can renew
+  tokens in process when permitted; access policy may still require another login.
 
-Command-line use from the repository root
+Advanced standalone helper, from the repository root
 pwsh -File .\scripts\ConditionalAccess\Export-ConditionalAccess.ps1 -TenantId contoso.onmicrosoft.com -ClientId 11111111-1111-1111-1111-111111111111
 
-Replace that example application ID. The helper prints the Microsoft sign-in code,
-uses the same registered adapter/report pipeline, then clears its session in finally.
+The UI never invokes this standalone helper. Its TenantId parameter is required;
+ClientId is optional and can be omitted to use the Microsoft Graph PowerShell client.
+Replace the example tenant and application ID with a reviewed target if using them.
+The helper opens normal Microsoft SDK sign-in, enables Extended read permissions,
+uses the same registered adapter/report pipeline and clears its session in finally.
 Optional -OutputRoot D:\Reports changes the local report destination.
 Invoke-Report.ps1 is the launcher adapter; do not bypass the session/hash contract.
 
@@ -160,17 +168,20 @@ lookups, with explicit uncertainty about their meaning. Other raw policy fields
 are preserved without claiming future schema semantics.
 
 Credential lifetime and read-only boundary
-Conditional Access uses its own GraphConditionalAccess session token/cache, bound
-to tenant, application and requested read scopes, separate from Intune auth.
-Tokens are SecureStrings in launcher memory. Only OAuth sign-in uses POST; target
-collection uses fixed GET paths. Pagination must stay on the same HTTPS Graph
-collection with approved query parameters. Redirects are disabled. Request headers
-and temporary unmanaged token buffers are cleared after collection. No refresh
-token is requested or persisted, and no Graph SDK authentication cache is created.
+Conditional Access and Intune reuse the launcher's shared Graph SDK worker, bound
+to the verified tenant, account, application and permission context. Tenant details
+stay in memory for the session. The SDK uses process-scoped authentication and can
+renew tokens in process when Microsoft policy permits; it may prompt again.
 
-Clear saved session or exiting the launcher clears/disposes its cached credentials
-and tokens. Browser sign-in cookies remain separate. Local cleanup does not revoke
-service-side tokens or guarantee forensic erasure of managed process memory.
+Only authentication uses OAuth POSTs; target collection uses fixed GET paths.
+Pagination must stay on the same HTTPS Graph collection with approved query
+parameters. Reports contain no passwords, secrets or bearer tokens. Report execution
+never registers applications, grants consent, changes roles or modifies settings.
+
+Logout / clear session, switching customer or exiting the launcher disconnects its
+app-owned sessions and disposes credentials and tokens. Browser/OS sign-in cookies
+and caches are separate. Local cleanup does not revoke service-side tokens or
+guarantee forensic erasure of managed process memory.
 
 Output files
 reports\<UTC timestamp>-<run id>\report.json:
@@ -227,9 +238,9 @@ Nothing is automatically sent to an LLM.
 
 Validation
 Test-Adapter.ps1 uses synthetic Graph fixtures. tests\Test-Authentication.ps1 checks
-scope isolation, requested permissions, cache boundaries and write-scope rejection.
-The shared infrastructure and Windows UI checks include this adapter. No live
-tenant policy, directory object or appointment was read or changed in development.
+the legacy standalone authentication boundary. Shared M365 session and Windows UI
+checks cover SDK tenant/account discovery, retained sessions and login-first gating.
+No live tenant policy or directory object was read or changed in development.
 Live tenant API/license/role compatibility must be verified by an authorized reader.
 
 Sources

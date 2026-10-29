@@ -1,639 +1,267 @@
 [CmdletBinding()]
 param([string]$ScriptsRoot=$PSScriptRoot,[string]$OutputRoot=(Join-Path $PSScriptRoot 'reports'),[switch]$VerifyUi,[string]$PreviewPath)
 $ErrorActionPreference='Stop'
-if($PSVersionTable.PSVersion.Major -lt 7 -or $env:OS -ne 'Windows_NT') { throw 'Run this launcher with PowerShell 7 on Windows.' }
+if($PSVersionTable.PSVersion.Major -lt 7 -or $env:OS -ne 'Windows_NT'){throw 'Use PowerShell 7 on Windows.'}
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-Import-Module (Join-Path $PSScriptRoot 'infrastructure/Catalog.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'infrastructure/Launcher.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'infrastructure/Presentation.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'infrastructure/ExtensionFiles.psm1') -Force
+foreach($module in @('Catalog','Launcher','Presentation')){Import-Module (Join-Path $PSScriptRoot "infrastructure/$module.psm1") -Force}
 [void][Windows.Forms.Application]::SetHighDpiMode([Windows.Forms.HighDpiMode]::PerMonitorV2)
 [Windows.Forms.Application]::EnableVisualStyles()
 $script:session=New-LauncherSession
-$script:job=$null; $script:worker=$null; $script:catalog=@(); $script:inputs=@{}; $script:lastReport=$null
-$script:copyAfterPrepare=$false; $script:extensionFolder=''; $script:extensionsRoot='C:\extensions'; $script:jobKind='Report'
-$script:ink=[Drawing.ColorTranslator]::FromHtml('#173454'); $script:muted=[Drawing.ColorTranslator]::FromHtml('#526478')
-$script:accent=[Drawing.ColorTranslator]::FromHtml('#176B87'); $script:page=[Drawing.ColorTranslator]::FromHtml('#F2F5F9')
-function Set-ButtonStyle {
-param([Windows.Forms.Button]$Button,[bool]$Primary=$false)
-$Button.Height=38; $Button.FlatStyle='Flat'; $Button.FlatAppearance.BorderSize=1; $Button.FlatAppearance.BorderColor=[Drawing.ColorTranslator]::FromHtml('#CBD5E1')
-$Button.BackColor=if($Primary){$script:accent}else{[Drawing.Color]::White}; $Button.ForeColor=if($Primary){[Drawing.Color]::White}else{$script:ink}; $Button.Margin=[Windows.Forms.Padding]::new(0,0,10,0)
+$script:worker=$null;$script:job=$null;$script:action='';$script:catalog=@();$script:inputs=@{};$script:lastReport=$null
+$ink=[Drawing.ColorTranslator]::FromHtml('#173454');$accent=[Drawing.ColorTranslator]::FromHtml('#176B87')
+$form=[Windows.Forms.Form]::new();$form.Text='Microsoft 365 reader';$form.Size=[Drawing.Size]::new(1320,930);$form.MinimumSize=[Drawing.Size]::new(1080,760);$form.StartPosition='CenterScreen';$form.Font=[Drawing.Font]::new('Segoe UI',11)
+$layout=[Windows.Forms.TableLayoutPanel]::new();$layout.Dock='Fill';$layout.Padding=[Windows.Forms.Padding]::new(18);$layout.RowCount=3;$layout.ColumnCount=1
+[void]$layout.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::Percent,100))
+foreach($height in @(100,-1,115)){[void]$layout.RowStyles.Add([Windows.Forms.RowStyle]::new($(if($height -lt 0){[Windows.Forms.SizeType]::Percent}else{[Windows.Forms.SizeType]::Absolute}),$(if($height -lt 0){100}else{$height})))}
+$form.Controls.Add($layout)
+$header=[Windows.Forms.TableLayoutPanel]::new();$header.Dock='Fill';$header.ColumnCount=2
+[void]$header.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::Percent,48));[void]$header.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::Percent,52))
+$title=[Windows.Forms.Label]::new();$title.Text='Microsoft 365 reader';$title.Font=[Drawing.Font]::new('Segoe UI',23,[Drawing.FontStyle]::Bold);$title.ForeColor=$ink;$title.Dock='Fill'
+$identity=[Windows.Forms.Label]::new();$identity.Dock='Fill';$identity.TextAlign='TopRight';$identity.Font=[Drawing.Font]::new('Segoe UI',11,[Drawing.FontStyle]::Bold);$identity.Text='Not logged in'
+$header.Controls.Add($title,0,0);$header.Controls.Add($identity,1,0);$layout.Controls.Add($header,0,0)
+$split=[Windows.Forms.SplitContainer]::new();$split.Dock='Fill';$split.Size=[Drawing.Size]::new(1240,650);$split.SplitterDistance=280;$split.Panel1MinSize=220;$split.Panel2MinSize=600;$layout.Controls.Add($split,0,1)
+$library=[Windows.Forms.TableLayoutPanel]::new();$library.Dock='Fill';$library.RowCount=5;$library.ColumnCount=1
+foreach($height in @(32,-1,44,44,44)){[void]$library.RowStyles.Add([Windows.Forms.RowStyle]::new($(if($height -lt 0){[Windows.Forms.SizeType]::Percent}else{[Windows.Forms.SizeType]::Absolute}),$(if($height -lt 0){100}else{$height})))}
+$libraryLabel=[Windows.Forms.Label]::new();$libraryLabel.Text='MICROSOFT 365 REPORTS';$libraryLabel.AutoSize=$true;$libraryLabel.ForeColor=$ink
+$list=[Windows.Forms.ListBox]::new();$list.Dock='Fill';$list.DisplayMember='DisplayName';$list.IntegralHeight=$false
+function New-Button([string]$Text){$button=[Windows.Forms.Button]::new();$button.Text=$Text;$button.Height=36;$button.Width=230;$button.FlatStyle='Flat';$button.Margin=[Windows.Forms.Padding]::new(3);return $button}
+$login=New-Button 'Login to 365';$login.Dock='Fill';$login.BackColor=$accent;$login.ForeColor=[Drawing.Color]::White
+$logout=New-Button 'Logout / clear session';$logout.Dock='Fill'
+$refresh=New-Button 'Refresh report library';$refresh.Dock='Fill'
+$library.Controls.Add($libraryLabel,0,0);$library.Controls.Add($list,0,1);$library.Controls.Add($login,0,2);$library.Controls.Add($logout,0,3);$library.Controls.Add($refresh,0,4);$split.Panel1.Controls.Add($library)
+$tabs=[Windows.Forms.TabControl]::new();$tabs.Dock='Fill';$split.Panel2.Controls.Add($tabs)
+$loginTab=[Windows.Forms.TabPage]::new('Login to 365');$guideTab=[Windows.Forms.TabPage]::new('Purpose and directions');$parametersTab=[Windows.Forms.TabPage]::new('Parameters');$directionsTab=[Windows.Forms.TabPage]::new('Full directions');$reportTab=[Windows.Forms.TabPage]::new('Report');$tableTab=[Windows.Forms.TabPage]::new('Record table');$jsonTab=[Windows.Forms.TabPage]::new('JSON')
+foreach($page in @($loginTab,$guideTab,$parametersTab,$directionsTab,$reportTab,$tableTab,$jsonTab)){$page.Padding=[Windows.Forms.Padding]::new(16);$page.BackColor=[Drawing.Color]::White;$tabs.TabPages.Add($page)}
+$loginFields=[Windows.Forms.FlowLayoutPanel]::new();$loginFields.Dock='Fill';$loginFields.FlowDirection='TopDown';$loginFields.WrapContents=$false;$loginFields.AutoScroll=$true;$loginTab.Controls.Add($loginFields)
+$loginHelp=[Windows.Forms.Label]::new();$loginHelp.Text='Please login to 365. Choose your work account in the Microsoft window. Reports unlock only after your username, tenant ID and organization details are discovered and saved in memory.';$loginHelp.AutoSize=$true;$loginHelp.MaximumSize=[Drawing.Size]::new(680,0)
+$signIn=New-Button 'Login to 365';$signIn.BackColor=$accent;$signIn.ForeColor=[Drawing.Color]::White
+$extended=[Windows.Forms.CheckBox]::new();$extended.Text='Extended read permissions for Intune and optional policy references';$extended.AutoSize=$true
+$advanced=[Windows.Forms.CheckBox]::new();$advanced.Text='Advanced / switch customer';$advanced.AutoSize=$true
+$advancedPanel=[Windows.Forms.FlowLayoutPanel]::new();$advancedPanel.FlowDirection='TopDown';$advancedPanel.WrapContents=$false;$advancedPanel.AutoSize=$true;$advancedPanel.Visible=$false
+function New-AdvancedInput([string]$Caption){$label=[Windows.Forms.Label]::new();$label.Text=$Caption;$label.AutoSize=$true;$box=[Windows.Forms.TextBox]::new();$box.Width=620;$advancedPanel.Controls.Add($label);$advancedPanel.Controls.Add($box);return $box}
+$tenantBox=New-AdvancedInput 'Optional customer domain/GUID override (blank = discover automatically)'
+$clientBox=New-AdvancedInput 'Optional existing public reader app ID'
+$spoBox=New-AdvancedInput 'SharePoint admin URL (suggested after discovery; verify renamed tenants)'
+$advanced.Add_CheckedChanged({$advancedPanel.Visible=$advanced.Checked})
+$serviceButtons=[Windows.Forms.FlowLayoutPanel]::new();$serviceButtons.Width=720;$serviceButtons.Height=135
+$actions=@{}
+foreach($spec in @(@('FindApp','Find reader app'),@('RegisterApp','Register reader app...'),@('ExchangeOnline','Connect Exchange'),@('SharePointOnline','Connect SharePoint'),@('SearchLogs','Search downloaded logs'))){
+    $button=New-Button $spec[1];$button.Tag=$spec[0];$button.Width=216
+    $button.Add_Click({param($sender,$e) Start-Operation ([string]$sender.Tag)})
+    $actions[$spec[0]]=$button;$serviceButtons.Controls.Add($button)
 }
-function Add-LayoutRow { param($Layout,[int]$Height) [void]$Layout.RowStyles.Add([Windows.Forms.RowStyle]::new([Windows.Forms.SizeType]::Absolute,$Height)) }
-function New-ReadingBox {
-$box=[Windows.Forms.RichTextBox]::new(); $box.Dock='Fill'; $box.ReadOnly=$true; $box.BorderStyle='None'; $box.BackColor=[Drawing.Color]::White; $box.DetectUrls=$false; return $box
-}
-$form=[Windows.Forms.Form]::new(); $form.Text='Infrastructure reports and tools'; $form.Size=[Drawing.Size]::new(1320,930); $form.MinimumSize=[Drawing.Size]::new(1080,760); $form.StartPosition='CenterScreen'
-$form.Font=[Drawing.Font]::new('Segoe UI',11); $form.AutoScaleMode='Dpi'; $form.BackColor=$script:page
-$rootLayout=[Windows.Forms.TableLayoutPanel]::new(); $rootLayout.Dock='Fill'; $rootLayout.Padding=[Windows.Forms.Padding]::new(18); $rootLayout.ColumnCount=1; $rootLayout.RowCount=2
-[void]$rootLayout.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::Percent,100))
-Add-LayoutRow $rootLayout 88; [void]$rootLayout.RowStyles.Add([Windows.Forms.RowStyle]::new([Windows.Forms.SizeType]::Percent,100)); $form.Controls.Add($rootLayout)
-$banner=[Windows.Forms.Panel]::new(); $banner.Dock='Fill'
-$appTitle=[Windows.Forms.Label]::new(); $appTitle.Text='Infrastructure reports and tools'; $appTitle.Font=[Drawing.Font]::new('Segoe UI',22,[Drawing.FontStyle]::Bold); $appTitle.ForeColor=$script:ink; $appTitle.AutoSize=$true
-$steps=[Windows.Forms.Label]::new(); $steps.Text='1  Choose a tool     2  Read the guide     3  Enter parameters     4  Run and review'; $steps.AutoSize=$true; $steps.ForeColor=$script:muted; $steps.Location=[Drawing.Point]::new(2,48)
-$banner.Controls.AddRange(@($appTitle,$steps)); $rootLayout.Controls.Add($banner,0,0)
-$split=[Windows.Forms.SplitContainer]::new(); $split.Dock='Fill'; $split.Size=[Drawing.Size]::new(1250,780); $split.SplitterDistance=285; $split.SplitterWidth=12; $split.Panel1MinSize=240; $split.Panel2MinSize=650; $rootLayout.Controls.Add($split,0,1)
-$library=[Windows.Forms.TableLayoutPanel]::new(); $library.Dock='Fill'; $library.ColumnCount=1; $library.RowCount=5
-[void]$library.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::Percent,100))
-Add-LayoutRow $library 30; Add-LayoutRow $library 44; [void]$library.RowStyles.Add([Windows.Forms.RowStyle]::new([Windows.Forms.SizeType]::Percent,100)); Add-LayoutRow $library 66; Add-LayoutRow $library 182; $split.Panel1.Controls.Add($library)
-$libraryTitle=[Windows.Forms.Label]::new(); $libraryTitle.Text='TOOLS AND REPORTS'; $libraryTitle.AutoSize=$true; $libraryTitle.ForeColor=$script:muted; $libraryTitle.Font=[Drawing.Font]::new('Segoe UI',10,[Drawing.FontStyle]::Bold)
-$search=[Windows.Forms.TextBox]::new(); $search.Dock='Top'; $search.PlaceholderText='Search reports'; $search.Margin=[Windows.Forms.Padding]::new(0,4,8,10)
-$list=[Windows.Forms.ListBox]::new(); $list.Dock='Fill'; $list.DisplayMember='DisplayName'; $list.BorderStyle='None'; $list.IntegralHeight=$false; $list.ItemHeight=36; $list.DrawMode='OwnerDrawFixed'; $list.Margin=[Windows.Forms.Padding]::new(0,0,8,12)
-$list.Add_DrawItem({
-param($sender,$eventArgs)
-if($eventArgs.Index -lt 0){return}
-$eventArgs.DrawBackground(); $name=$sender.Items[$eventArgs.Index].DisplayName
-if($sender.Items[$eventArgs.Index].Errors.Count){$name+=' (unavailable)'}
-$color=if(($eventArgs.State -band [Windows.Forms.DrawItemState]::Selected) -ne 0){[Drawing.Color]::White}elseif($sender.Items[$eventArgs.Index].Errors.Count){$script:muted}else{$script:ink}
-$bounds=$eventArgs.Bounds; $bounds.X+=10; $bounds.Width-=12
-[Windows.Forms.TextRenderer]::DrawText($eventArgs.Graphics,$name,$sender.Font,$bounds,$color,([Windows.Forms.TextFormatFlags]::VerticalCenter -bor [Windows.Forms.TextFormatFlags]::EndEllipsis)); $eventArgs.DrawFocusRectangle()
-})
-$memoryNote=[Windows.Forms.Label]::new(); $memoryNote.Dock='Fill'; $memoryNote.Text='Read-only collection.'+[Environment]::NewLine+'Credentials stay in this session and are cleared when you exit.'; $memoryNote.ForeColor=$script:muted; $memoryNote.Font=[Drawing.Font]::new('Segoe UI',9); $memoryNote.Padding=[Windows.Forms.Padding]::new(0,4,10,0)
-$leftActions=[Windows.Forms.FlowLayoutPanel]::new(); $leftActions.Dock='Fill'; $leftActions.FlowDirection='TopDown'; $leftActions.WrapContents=$false
-$refresh=[Windows.Forms.Button]::new(); $refresh.Text='Refresh reports'; $credentials=[Windows.Forms.Button]::new(); $credentials.Text='Session credentials'; $forget=[Windows.Forms.Button]::new(); $forget.Text='Clear saved session'
-$login=[Windows.Forms.Button]::new(); $login.Text='Login to 365'
-foreach($button in @($login,$credentials,$forget,$refresh)) { $button.Width=260; Set-ButtonStyle $button ($button -eq $login); $button.Margin=[Windows.Forms.Padding]::new(0,0,0,6); $leftActions.Controls.Add($button) }
-$library.Controls.Add($libraryTitle,0,0); $library.Controls.Add($search,0,1); $library.Controls.Add($list,0,2); $library.Controls.Add($memoryNote,0,3); $library.Controls.Add($leftActions,0,4)
-$content=[Windows.Forms.TableLayoutPanel]::new(); $content.Dock='Fill'; $content.RowCount=3; $content.ColumnCount=1
-[void]$content.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::Percent,100))
-Add-LayoutRow $content 72; [void]$content.RowStyles.Add([Windows.Forms.RowStyle]::new([Windows.Forms.SizeType]::Percent,100)); Add-LayoutRow $content 152; $split.Panel2.Controls.Add($content)
-$reportHeader=[Windows.Forms.Panel]::new(); $reportHeader.Dock='Fill'
-$selectedTitle=[Windows.Forms.Label]::new(); $selectedTitle.Font=[Drawing.Font]::new('Segoe UI',17,[Drawing.FontStyle]::Bold); $selectedTitle.ForeColor=$script:ink; $selectedTitle.AutoSize=$true; $selectedTitle.Text='Choose a report'
-$selectedHint=[Windows.Forms.Label]::new(); $selectedHint.Location=[Drawing.Point]::new(2,39); $selectedHint.AutoSize=$true; $selectedHint.ForeColor=$script:muted; $selectedHint.Font=[Drawing.Font]::new('Segoe UI',10); $selectedHint.Text='The guide explains the purpose, access requirements and expected results.'
-$reportHeader.Controls.AddRange(@($selectedTitle,$selectedHint)); $content.Controls.Add($reportHeader,0,0)
-$tabs=[Windows.Forms.TabControl]::new(); $tabs.Dock='Fill'; $tabs.Padding=[Drawing.Point]::new(13,8)
-$usageTab=[Windows.Forms.TabPage]::new('Start here'); $paramTab=[Windows.Forms.TabPage]::new('Parameters'); $resultTab=[Windows.Forms.TabPage]::new('Report'); $gridTab=[Windows.Forms.TabPage]::new('Record table'); $dataTab=[Windows.Forms.TabPage]::new('JSON'); $detailsTab=[Windows.Forms.TabPage]::new('Technical details')
-foreach($tabPage in @($usageTab,$paramTab,$resultTab,$gridTab,$dataTab,$detailsTab)) { $tabPage.BackColor=[Drawing.Color]::White; $tabPage.Padding=[Windows.Forms.Padding]::new(18) }
-$usage=New-ReadingBox; $details=New-ReadingBox; $reportText=New-ReadingBox
-$jsonText=[Windows.Forms.TextBox]::new(); $jsonText.Multiline=$true; $jsonText.ReadOnly=$true; $jsonText.ScrollBars='Both'; $jsonText.Dock='Fill'; $jsonText.WordWrap=$false; $jsonText.Font=[Drawing.Font]::new('Consolas',10); $jsonText.BackColor=[Drawing.Color]::White; $jsonText.BorderStyle='None'
-$grid=[Windows.Forms.DataGridView]::new(); $grid.Dock='Fill'; $grid.ReadOnly=$true; $grid.AllowUserToAddRows=$false; $grid.AllowUserToDeleteRows=$false; $grid.AutoSizeColumnsMode='DisplayedCells'; $grid.ClipboardCopyMode='EnableAlwaysIncludeHeaderText'; $grid.BackgroundColor=[Drawing.Color]::White; $grid.BorderStyle='None'; $grid.RowTemplate.Height=32; $grid.EnableHeadersVisualStyles=$false; $grid.ColumnHeadersDefaultCellStyle.BackColor=$script:page; $grid.ColumnHeadersDefaultCellStyle.ForeColor=$script:ink; $grid.ColumnHeadersDefaultCellStyle.Font=[Drawing.Font]::new('Segoe UI',10,[Drawing.FontStyle]::Bold)
-$fields=[Windows.Forms.FlowLayoutPanel]::new(); $fields.Dock='Fill'; $fields.FlowDirection='TopDown'; $fields.WrapContents=$false; $fields.AutoScroll=$true
-$usageTab.Controls.Add($usage); $paramTab.Controls.Add($fields); $resultTab.Controls.Add($reportText); $gridTab.Controls.Add($grid); $dataTab.Controls.Add($jsonText); $detailsTab.Controls.Add($details)
-$tabs.TabPages.AddRange(@($usageTab,$paramTab,$resultTab,$gridTab,$dataTab,$detailsTab)); $content.Controls.Add($tabs,0,1)
-$loginTab=[Windows.Forms.TabPage]::new('Microsoft 365');$loginTab.BackColor=[Drawing.Color]::White;$loginTab.Padding=[Windows.Forms.Padding]::new(16)
-$loginFields=[Windows.Forms.FlowLayoutPanel]::new();$loginFields.Dock='Fill';$loginFields.FlowDirection='TopDown';$loginFields.WrapContents=$false;$loginFields.AutoScroll=$true
-function Add-LoginField([string]$Title,[string]$Hint) {
-    $label=[Windows.Forms.Label]::new();$label.Text=$Title;$label.AutoSize=$true;$label.Font=[Drawing.Font]::new('Segoe UI',11,[Drawing.FontStyle]::Bold)
-    $help=[Windows.Forms.Label]::new();$help.Text=$Hint;$help.AutoSize=$true;$help.MaximumSize=[Drawing.Size]::new(680,0)
-    $box=[Windows.Forms.TextBox]::new();$box.Width=620
-    $loginFields.Controls.Add($label);$loginFields.Controls.Add($help);$loginFields.Controls.Add($box)
-    return $box
-}
-$tenantBox=Add-LoginField 'Customer tenant override (optional)' 'Leave blank for automatic discovery. Use a customer domain or GUID only to deliberately target a different organization.'
-$clientBox=Add-LoginField 'Reader application ID (optional)' 'Leave blank to use Microsoft Graph PowerShell, or use a reviewed reader app. Find an existing reader app or explicitly register one below.'
-$spoBox=Add-LoginField 'SharePoint admin URL' 'Suggested after login; verify this address, especially if the tenant was renamed.'
-$advancedPanel=[Windows.Forms.FlowLayoutPanel]::new();$advancedPanel.FlowDirection='TopDown';$advancedPanel.WrapContents=$false;$advancedPanel.AutoSize=$true;$advancedPanel.AutoSizeMode='GrowAndShrink';$advancedPanel.Visible=$false
-foreach($control in @($loginFields.Controls)){$advancedPanel.Controls.Add($control)}
-$advancedToggle=[Windows.Forms.CheckBox]::new();$advancedToggle.Text='Advanced / switch customer: optional tenant, app ID or SharePoint URL';$advancedToggle.AutoSize=$true
-$advancedToggle.Add_CheckedChanged({$advancedPanel.Visible=$advancedToggle.Checked})
-$loginFields.Controls.Add($advancedToggle);$loginFields.Controls.Add($advancedPanel)
-$extended=[Windows.Forms.CheckBox]::new();$extended.Text='Extended reads: Intune, hidden groups, custom attributes and network references';$extended.AutoSize=$true;$loginFields.Controls.Add($extended)
-$loginActions=[Windows.Forms.FlowLayoutPanel]::new();$loginActions.Width=700;$loginActions.Height=140;$loginActions.WrapContents=$true
-$authButtons=@{}
-foreach($spec in @(@('SignIn','Login to 365'),@('FindApp','Find reader app'),@('RegisterApp','Register reader app...'),@('ExchangeOnline','Connect Exchange'),@('Azure','Connect Azure'),@('SharePointOnline','Connect SharePoint'),@('Install','Install prerequisites...'),@('SearchLogs','Search downloaded logs'))) {
-    $button=[Windows.Forms.Button]::new();$button.Text=$spec[1];$button.Tag=$spec[0];$button.Width=216;Set-ButtonStyle $button ($spec[0] -eq 'SignIn')
-    $button.Add_Click({param($sender,$eventArgs) Start-M365Operation ([string]$sender.Tag)})
-    $authButtons[$spec[0]]=$button;$loginActions.Controls.Add($button)
-}
-$loginFields.Controls.Add($loginActions)
-$connectionState=[Windows.Forms.TextBox]::new();$connectionState.Width=680;$connectionState.Height=150;$connectionState.Multiline=$true;$connectionState.ReadOnly=$true;$connectionState.ScrollBars='Vertical';$connectionState.Text='Not connected. Login to 365 opens Microsoft sign-in. Connect additional services only when needed.'
-$connectionState.Text='Click Login to 365 and choose your work account in the Microsoft window. Your username, organization and tenant ID are discovered automatically and saved for this session.'
-$loginFields.Controls.Add($connectionState);$loginTab.Controls.Add($loginFields);$tabs.TabPages.Insert(0,$loginTab)
-$connectionState.Height=70;$loginFields.Controls.SetChildIndex($connectionState,0)
+$install=New-Button 'Install local prerequisites...'
+$connection=[Windows.Forms.TextBox]::new();$connection.Width=680;$connection.Height=140;$connection.Multiline=$true;$connection.ReadOnly=$true;$connection.ScrollBars='Vertical';$connection.Text='Not logged in. Please login to 365.'
+foreach($control in @($loginHelp,$signIn,$extended,$advanced,$advancedPanel,$serviceButtons,$install,$connection)){$loginFields.Controls.Add($control)}
 $loginFields.Add_SizeChanged({
-    $width=[Math]::Max(300,$loginFields.ClientSize.Width-30)
-    foreach($control in @($tenantBox,$clientBox,$spoBox,$loginActions,$connectionState)){$control.Width=$width}
+    $width=[Math]::Max(300,$loginFields.ClientSize.Width-25)
+    $loginHelp.MaximumSize=[Drawing.Size]::new($width,0);$extended.MaximumSize=[Drawing.Size]::new($width,0)
     $advancedPanel.MaximumSize=[Drawing.Size]::new($width,0)
-    foreach($control in @($advancedPanel.Controls)){if($control -is [Windows.Forms.Label]){$control.MaximumSize=[Drawing.Size]::new($width-8,0)}else{$control.Width=$width-8}}
-    $advancedToggle.MaximumSize=[Drawing.Size]::new($width,0)
-    $extended.MaximumSize=[Drawing.Size]::new($width,0)
-    $loginActions.Height=if($width -lt 680){190}else{140}
+    foreach($control in @($tenantBox,$clientBox,$spoBox,$connection,$serviceButtons)){$control.Width=$width-8}
+    $serviceButtons.Height=if($width -lt 680){135}else{95}
 })
-$installTab=[Windows.Forms.TabPage]::new('Install extension'); $installTab.BackColor=[Drawing.Color]::White; $installTab.Padding=[Windows.Forms.Padding]::new(18)
-$installLayout=[Windows.Forms.TableLayoutPanel]::new(); $installLayout.Dock='Fill'; $installLayout.ColumnCount=1; $installLayout.RowCount=5
-[void]$installLayout.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::Percent,100))
-foreach($height in @(30,38,68,50)) { Add-LayoutRow $installLayout $height }
-[void]$installLayout.RowStyles.Add([Windows.Forms.RowStyle]::new([Windows.Forms.SizeType]::Percent,100))
-$installLabel=[Windows.Forms.Label]::new(); $installLabel.Text='Folder to select with Load unpacked'; $installLabel.AutoSize=$true; $installLabel.Font=[Drawing.Font]::new('Segoe UI',11,[Drawing.FontStyle]::Bold); $installLabel.ForeColor=$script:ink
-$installFolder=[Windows.Forms.TextBox]::new(); $installFolder.Dock='Top'; $installFolder.ReadOnly=$true; $installFolder.BackColor=[Drawing.Color]::White; $installFolder.Text='C:\extensions\HaloAppointmentManager'
-$installStatus=[Windows.Forms.Label]::new(); $installStatus.Dock='Fill'; $installStatus.ForeColor=$script:muted; $installStatus.Padding=[Windows.Forms.Padding]::new(0,6,0,0); $installStatus.Text='Not copied yet. The button below creates the directory and copies the extension files. Browser installation is manual.'
-$installActions=[Windows.Forms.FlowLayoutPanel]::new(); $installActions.Dock='Fill'
-$copyExtension=[Windows.Forms.Button]::new(); $copyExtension.Text='Copy to C:\extensions'; $copyExtension.Width=230; Set-ButtonStyle $copyExtension $true
-$openExtension=[Windows.Forms.Button]::new(); $openExtension.Text='Open extension folder'; $openExtension.Width=210; $openExtension.Enabled=$false; Set-ButtonStyle $openExtension
-$installActions.Controls.AddRange(@($copyExtension,$openExtension))
-$installGuide=New-ReadingBox; $installGuide.Font=$form.Font
-Add-GuideParagraph $installGuide 'Install in Edge or Chrome' 'heading'
-Add-GuideParagraph $installGuide '1. Choose Copy to C:\extensions. It prepares and copies the package for the Halo address in Parameters.'
-Add-GuideParagraph $installGuide '2. Disable the older Halo Appointment Manager extension if it is enabled.'
-Add-GuideParagraph $installGuide '3. Open edge://extensions in Edge, or chrome://extensions in Chrome.'
-Add-GuideParagraph $installGuide '4. Enable Developer mode if your browser policy permits it.'
-Add-GuideParagraph $installGuide '5. Choose Load unpacked, then select the exact folder displayed above. Select the folder containing manifest.json.'
-Add-GuideParagraph $installGuide '6. Refresh your Halo Calendar page. The Halo appointments button appears there.'
-Add-GuideParagraph $installGuide 'Copying files does not install anything in the browser or contact Halo. Existing extension files are preserved. If a different copy already exists, the new copy receives a dated folder name and its exact path appears above.' 'bullet'
-$installLayout.Controls.Add($installLabel,0,0); $installLayout.Controls.Add($installFolder,0,1); $installLayout.Controls.Add($installStatus,0,2); $installLayout.Controls.Add($installActions,0,3); $installLayout.Controls.Add($installGuide,0,4); $installTab.Controls.Add($installLayout)
-$bottom=[Windows.Forms.TableLayoutPanel]::new(); $bottom.Dock='Fill'; $bottom.ColumnCount=1; $bottom.RowCount=3; $bottom.Padding=[Windows.Forms.Padding]::new(0,12,0,0)
-[void]$bottom.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::Percent,100))
-Add-LayoutRow $bottom 44; Add-LayoutRow $bottom 26; [void]$bottom.RowStyles.Add([Windows.Forms.RowStyle]::new([Windows.Forms.SizeType]::Percent,100))
-$actions=[Windows.Forms.FlowLayoutPanel]::new(); $actions.Dock='Fill'
-$run=[Windows.Forms.Button]::new(); $run.Text='Run report'; $run.Enabled=$false; $run.Width=165; Set-ButtonStyle $run $true
-$stop=[Windows.Forms.Button]::new(); $stop.Text='Cancel'; $stop.Enabled=$false; $stop.Width=100; Set-ButtonStyle $stop
-$open=[Windows.Forms.Button]::new(); $open.Text='Open report folder'; $open.Width=185; $open.Enabled=$false; Set-ButtonStyle $open; $actions.Controls.AddRange(@($run,$stop,$open))
-$statusLabel=[Windows.Forms.Label]::new(); $statusLabel.Text='STATUS AND SIGN-IN'; $statusLabel.ForeColor=$script:muted; $statusLabel.AutoSize=$true; $statusLabel.Font=[Drawing.Font]::new('Segoe UI',9,[Drawing.FontStyle]::Bold)
-$status=[Windows.Forms.TextBox]::new(); $status.Dock='Fill'; $status.Multiline=$true; $status.ReadOnly=$true; $status.ScrollBars='Vertical'; $status.BackColor=[Drawing.Color]::White; $status.Text='Ready. Choose a report to see its guide.'; $status.Font=[Drawing.Font]::new('Segoe UI',10)
-$bottom.Controls.Add($actions,0,0); $bottom.Controls.Add($statusLabel,0,1); $bottom.Controls.Add($status,0,2); $content.Controls.Add($bottom,0,2)
-function Update-ParameterLayout {
-$width=[Math]::Max(350,$fields.ClientSize.Width-30)
-foreach($card in $fields.Controls) {
-    $card.Width=$width
-    if($card.Tag -is [hashtable]) {
-        $card.MinimumSize=[Drawing.Size]::new($width,0); $card.MaximumSize=[Drawing.Size]::new($width,0)
-        foreach($label in @($card.Tag.Title,$card.Tag.Help)) { $label.MaximumSize=[Drawing.Size]::new($width-4,0) }
-    } else { $card.MaximumSize=[Drawing.Size]::new($width,0) }
+$guide=[Windows.Forms.RichTextBox]::new();$guide.Dock='Fill';$guide.ReadOnly=$true;$guide.BorderStyle='None';$guide.BackColor=[Drawing.Color]::White;$guideTab.Controls.Add($guide)
+$directions=[Windows.Forms.RichTextBox]::new();$directions.Dock='Fill';$directions.ReadOnly=$true;$directions.BorderStyle='None';$directions.BackColor=[Drawing.Color]::White;$directionsTab.Controls.Add($directions)
+$fields=[Windows.Forms.FlowLayoutPanel]::new();$fields.Dock='Fill';$fields.FlowDirection='TopDown';$fields.WrapContents=$false;$fields.AutoScroll=$true;$parametersTab.Controls.Add($fields)
+$report=[Windows.Forms.RichTextBox]::new();$report.Dock='Fill';$report.ReadOnly=$true;$report.BorderStyle='None';$report.BackColor=[Drawing.Color]::White;$reportTab.Controls.Add($report)
+$json=[Windows.Forms.TextBox]::new();$json.Dock='Fill';$json.ReadOnly=$true;$json.Multiline=$true;$json.WordWrap=$false;$json.ScrollBars='Both';$json.Font=[Drawing.Font]::new('Consolas',10);$jsonTab.Controls.Add($json)
+$grid=[Windows.Forms.DataGridView]::new();$grid.Dock='Fill';$grid.ReadOnly=$true;$grid.AllowUserToAddRows=$false;$grid.AllowUserToDeleteRows=$false;$grid.AutoSizeColumnsMode='DisplayedCells';$grid.BackgroundColor=[Drawing.Color]::White;$tableTab.Controls.Add($grid)
+$footer=[Windows.Forms.TableLayoutPanel]::new();$footer.Dock='Fill';$footer.RowCount=2;$footer.ColumnCount=1
+[void]$footer.RowStyles.Add([Windows.Forms.RowStyle]::new([Windows.Forms.SizeType]::Absolute,43));[void]$footer.RowStyles.Add([Windows.Forms.RowStyle]::new([Windows.Forms.SizeType]::Percent,100))
+$run=New-Button 'Run read-only report';$cancel=New-Button 'Cancel';$cancel.Width=100;$open=New-Button 'Open report folder'
+$footerButtons=[Windows.Forms.FlowLayoutPanel]::new();$footerButtons.Dock='Fill';$footerButtons.Controls.AddRange(@($run,$cancel,$open))
+$status=[Windows.Forms.TextBox]::new();$status.Dock='Fill';$status.Multiline=$true;$status.ReadOnly=$true;$status.ScrollBars='Vertical';$status.Text='Please login to 365.'
+$footer.Controls.Add($footerButtons,0,0);$footer.Controls.Add($status,0,1);$layout.Controls.Add($footer,0,2)
+function Test-LoggedIn {
+    return [bool]($script:session.SharedGraph.Ready -and $script:session.Tenant.Id -and $script:session.Tenant.Account -and $script:session.Tenant.Id -eq $script:session.SharedGraph.TenantId)
 }
-}
-$fields.Add_SizeChanged({Update-ParameterLayout})
-function Add-ParameterCard {
-param([hashtable]$Parameter)
-$card=[Windows.Forms.TableLayoutPanel]::new(); $card.ColumnCount=1; $card.RowCount=3; $card.AutoSize=$true; $card.AutoSizeMode='GrowAndShrink'; $card.Margin=[Windows.Forms.Padding]::new(0,0,0,6); $card.Width=650
-[void]$card.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::Percent,100))
-$title=[Windows.Forms.Label]::new(); $title.AutoSize=$true; $title.Font=[Drawing.Font]::new('Segoe UI',11,[Drawing.FontStyle]::Bold); $title.ForeColor=$script:ink; $title.Text=$Parameter.label+$(if($Parameter.required){'  ·  Required'}else{'  ·  Optional'})
-$help=[Windows.Forms.Label]::new(); $help.AutoSize=$true; $help.ForeColor=$script:muted; $help.Font=[Drawing.Font]::new('Segoe UI',10); $help.Margin=[Windows.Forms.Padding]::new(0,4,0,4); $help.Text=[string]$Parameter.help
-if($Parameter.type -eq 'boolean') { $control=[Windows.Forms.CheckBox]::new(); $control.AutoSize=$true; $control.Text='Include this in the report'; $control.Checked=[bool]$Parameter.default }
-elseif($Parameter.type -eq 'integer') {
-    $control=[Windows.Forms.NumericUpDown]::new()
-    $control.Minimum=if($Parameter.ContainsKey('minimum')){[decimal]$Parameter.minimum}else{1}
-    $control.Maximum=if($Parameter.ContainsKey('maximum')){[decimal]$Parameter.maximum}else{36500}
-    $control.Value=[decimal]$Parameter.default; $control.Width=160
-}
-else {
-$control=[Windows.Forms.TextBox]::new(); $control.Dock='Fill'; $control.Margin=[Windows.Forms.Padding]::new(0,6,0,0)
-if($Parameter.ContainsKey('placeholder')){$control.PlaceholderText=$Parameter.placeholder}
-if($Parameter.ContainsKey('default')) { $control.Text=if($Parameter.type -eq 'file'){ConvertTo-LauncherFilePath $Parameter.default $PSScriptRoot}else{([string]$Parameter.default).Replace('{LauncherRoot}',$PSScriptRoot)} }
-}
-$card.Controls.Add($title,0,0); $card.Controls.Add($help,0,1)
-if($Parameter.type -eq 'file') {
-$pathRow=[Windows.Forms.TableLayoutPanel]::new(); $pathRow.Dock='Fill'; $pathRow.ColumnCount=2; $pathRow.RowCount=1; $pathRow.Height=43; $pathRow.Margin=[Windows.Forms.Padding]::new(0)
-[void]$pathRow.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::Percent,100)); [void]$pathRow.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::Absolute,108))
-$browse=[Windows.Forms.Button]::new(); $browse.Text='Browse…'; $browse.Dock='Fill'; Set-ButtonStyle $browse; $browse.Tag=$control
-$browse.Add_Click({
-param($sender,$eventArgs)
-$picker=[Windows.Forms.OpenFileDialog]::new(); $picker.Title='Choose the verified AZQR executable'; $picker.Filter='AZQR executable (azqr.exe)|azqr.exe|Executable files (*.exe)|*.exe'; $picker.CheckFileExists=$true
-try { $current=$sender.Tag.Text; if($current -and (Test-Path -LiteralPath (Split-Path $current -Parent))) { $picker.InitialDirectory=Split-Path $current -Parent }; if($picker.ShowDialog($form) -eq 'OK') { $sender.Tag.Text=ConvertTo-LauncherFilePath $picker.FileName $PSScriptRoot } } finally { $picker.Dispose() }
-})
-$pathRow.Controls.Add($control,0,0); $pathRow.Controls.Add($browse,1,0); $card.Controls.Add($pathRow,0,2)
-} else { $card.Controls.Add($control,0,2) }
-$card.Tag=@{Title=$title;Help=$help}; $fields.Controls.Add($card); $script:inputs[$Parameter.name]=$control
-}
-
-function Set-Busy([bool]$busy) {
-    foreach($control in @($list,$search,$refresh,$credentials,$forget,$fields,$loginFields)) { $control.Enabled=-not $busy }
-    $stop.Enabled=$busy
-    $run.Enabled=(-not $busy -and $null -ne $list.SelectedItem -and $list.SelectedItem.Errors.Count -eq 0)
-    $copyExtension.Enabled=$run.Enabled -and $list.SelectedItem.Manifest.id -eq 'halo-appointment-manager'
-    $openExtension.Enabled=-not $busy -and -not [string]::IsNullOrWhiteSpace($script:extensionFolder)
-}
-function Update-List {
-    $list.Items.Clear()
-    foreach($item in $script:catalog) {
-        if(($item.DisplayName+' '+$item.Name+' '+$item.Purpose).IndexOf($search.Text,[StringComparison]::OrdinalIgnoreCase) -ge 0) { [void]$list.Items.Add($item) }
+function Update-LoginState {
+    $busy=$null -ne $script:job;$ready=(Test-LoggedIn) -and $script:action -notin @('Login','RegisterApp')
+    $list.Enabled=$ready -and -not $busy;$refresh.Enabled=$ready -and -not $busy;$fields.Enabled=$ready -and -not $busy
+    $run.Enabled=$ready -and -not $busy -and $null -ne $list.SelectedItem -and $list.SelectedItem.Errors.Count -eq 0
+    $logout.Enabled=$ready -and -not $busy;$open.Enabled=$ready -and -not $busy -and $null -ne $script:lastReport
+    $cancel.Enabled=$busy;$login.Enabled=-not $busy;$signIn.Enabled=-not $busy;$install.Enabled=-not $busy -and -not $ready
+    $advanced.Enabled=-not $busy;$advancedPanel.Enabled=-not $busy;$extended.Enabled=-not $busy
+    foreach($button in $actions.Values){$button.Enabled=$ready -and -not $busy}
+    foreach($page in @($guideTab,$parametersTab,$directionsTab,$reportTab,$tableTab,$jsonTab)){$page.Enabled=$ready -and -not $busy}
+    if($ready){
+        $identity.Text='Logged in as '+$script:session.Tenant.Account+[Environment]::NewLine+$script:session.Tenant.DisplayName+[Environment]::NewLine+'Tenant: '+$script:session.Tenant.Id
+        $identity.ForeColor=$ink
+        $loginHelp.Text='Logged in. Your verified account and tenant are stored in this session for all Microsoft 365 reports.'
+        $connection.Text='Account: '+$script:session.Tenant.Account+[Environment]::NewLine+'Organization: '+$script:session.Tenant.DisplayName+[Environment]::NewLine+'Tenant ID: '+$script:session.Tenant.Id+[Environment]::NewLine+'Domain: '+$script:session.Tenant.Domain
+        foreach($service in @(Get-LauncherServiceStatus $script:session)){$connection.AppendText([Environment]::NewLine+$service.Service+': '+$service.Status)}
+    }else{
+        $identity.Text=if($busy -and $script:action -eq 'Login'){'Signing in...'}else{'Not logged in'}
+        $identity.ForeColor=[Drawing.Color]::DimGray
+        $loginHelp.Text='Please login to 365. Reports remain locked until account and tenant discovery succeeds.'
+        if(-not $busy){$connection.Text=if($script:session.SharedGraph.LastError){$script:session.SharedGraph.LastError}else{'Not logged in. Please login to 365.'}}
+        $tabs.SelectedTab=$loginTab
     }
-    if($list.Items.Count) { $list.SelectedIndex=0 }
 }
-function Refresh-Catalog {
-    try { $script:catalog=@(Get-ScriptCatalog $ScriptsRoot | Sort-Object Name); Update-List; $status.Text="$($script:catalog.Count) reporting adapters. Session credentials are memory-only." }
-    catch { $status.Text='Cannot discover report manifests. Check the scripts root and directions files.' }
+function Clear-Results {$script:lastReport=$null;$report.Clear();$json.Clear();$grid.DataSource=$null}
+function Set-Parameters {
+    foreach($control in @($fields.Controls)){$fields.Controls.Remove($control);$control.Dispose()}
+    $script:inputs=@{}
+    if(-not $list.SelectedItem){return}
+    $item=$list.SelectedItem
+    Set-LauncherGuide $guide $item.Manifest
+    Set-LauncherTechnicalDetails $directions $item.Usage
+    foreach($parameter in $item.Parameters){
+        $label=[Windows.Forms.Label]::new();$label.Text=$parameter.label;$label.AutoSize=$true;$label.Font=[Drawing.Font]::new('Segoe UI',11,[Drawing.FontStyle]::Bold)
+        $help=[Windows.Forms.Label]::new();$help.Text=$parameter.help;$help.AutoSize=$true;$help.MaximumSize=[Drawing.Size]::new(650,0)
+        $fields.Controls.Add($label);$fields.Controls.Add($help)
+        if($parameter.type -eq 'boolean'){$input=[Windows.Forms.CheckBox]::new();$input.Text='Include';$input.Checked=[bool]$parameter.default}
+        elseif($parameter.type -eq 'integer'){$input=[Windows.Forms.NumericUpDown]::new();$input.Minimum=$parameter.minimum;$input.Maximum=$parameter.maximum;$input.Value=$parameter.default}
+        else{$input=[Windows.Forms.TextBox]::new();$input.Width=600;if($parameter.ContainsKey('default')){$input.Text=[string]$parameter.default}}
+        $fields.Controls.Add($input);$script:inputs[$parameter.name]=$input
+    }
+    Update-LoginState
 }
-function Show-CredentialDialog {
-    param([string]$PreviewFile)
-    $dialog=[Windows.Forms.Form]::new(); $dialog.Text='Session credentials'; $dialog.Size=[Drawing.Size]::new(640,600); $dialog.StartPosition='CenterParent'; $dialog.Font=$form.Font; $dialog.FormBorderStyle='FixedDialog'; $dialog.MaximizeBox=$false; $dialog.MinimizeBox=$false; $dialog.BackColor=[Drawing.Color]::White
-    $panel=[Windows.Forms.FlowLayoutPanel]::new(); $panel.Dock='Fill'; $panel.FlowDirection='TopDown'; $panel.WrapContents=$false; $panel.Padding=[Windows.Forms.Padding]::new(24)
-    $heading=[Windows.Forms.Label]::new(); $heading.Text='Use credentials across reports'; $heading.AutoSize=$true; $heading.Font=[Drawing.Font]::new('Segoe UI',16,[Drawing.FontStyle]::Bold); $heading.Margin=[Windows.Forms.Padding]::new(0,0,0,14)
-    $kind=[Windows.Forms.ComboBox]::new(); $kind.DropDownStyle='DropDownList'; $kind.Width=560; $kind.Margin=[Windows.Forms.Padding]::new(0,0,0,12)
-    $kind.Items.AddRange(@('Directory account','Azure application')); $kind.SelectedIndex=0
-    $hint=[Windows.Forms.Label]::new(); $hint.AutoSize=$true; $hint.MaximumSize=[Drawing.Size]::new(560,0); $hint.ForeColor=$script:muted; $hint.Margin=[Windows.Forms.Padding]::new(0,0,0,16)
-    $usernameLabel=[Windows.Forms.Label]::new(); $usernameLabel.AutoSize=$true
-    $username=[Windows.Forms.TextBox]::new(); $username.Width=560; $username.Margin=[Windows.Forms.Padding]::new(0,4,0,14)
-    $passwordLabel=[Windows.Forms.Label]::new(); $passwordLabel.AutoSize=$true
-    $password=[Windows.Forms.TextBox]::new(); $password.Width=560; $password.UseSystemPasswordChar=$true; $password.Margin=[Windows.Forms.Padding]::new(0,4,0,14)
-    $note=[Windows.Forms.Label]::new(); $note.AutoSize=$true; $note.MaximumSize=[Drawing.Size]::new(560,0); $note.ForeColor=$script:muted; $note.Text='• Kept in memory for this session.'+[Environment]::NewLine+'• Cleared when you exit or choose Clear saved session.'; $note.Margin=[Windows.Forms.Padding]::new(0,0,0,18)
-    $save=[Windows.Forms.Button]::new(); $save.Text='Use in session'; $save.Width=160; Set-ButtonStyle $save $true
-    $updateCredentialHelp={
-        $username.Clear(); $password.Clear()
-        if($kind.SelectedIndex -eq 1) {
-            $hint.Text='For Azure resource review. Use an existing application with Reader access to the subscription.'
-            $usernameLabel.Text='Application ID'; $username.PlaceholderText='Application (client) ID from Microsoft Entra ID'
-            $passwordLabel.Text='Client secret'; $password.PlaceholderText='Secret value, not the secret ID'
-        } else {
-            $hint.Text='For AD computer activity and remote Reboot history. Leave this unset to use your Windows identity. Local reboot reports always use your Windows identity.'
-            $usernameLabel.Text='Directory username'; $username.PlaceholderText='DOMAIN\user or user@domain.example'
-            $passwordLabel.Text='Password'; $password.PlaceholderText='Directory account password'
-        }
-    }
-    $kind.Add_SelectedIndexChanged($updateCredentialHelp); & $updateCredentialHelp
-    $save.Add_Click({
-        if(-not $username.Text -or -not $password.Text) { return }
-        $key=if($kind.SelectedIndex -eq 1){'AzureServicePrincipal'}else{'ActiveDirectory'}
-        $secret=ConvertTo-SecureString $password.Text -AsPlainText -Force
-        if($script:session.Credentials.ContainsKey($key)) { $script:session.Credentials[$key].Password.Dispose() }
-        $script:session.Credentials[$key]=[pscredential]::new($username.Text,$secret)
-        $password.Clear(); $username.Clear(); $dialog.DialogResult='OK'; $dialog.Close()
-    })
-    $panel.Controls.AddRange(@($heading,$kind,$hint,$usernameLabel,$username,$passwordLabel,$password,$note,$save)); $dialog.Controls.Add($panel); $dialog.AcceptButton=$save
-    try {
-        if($PreviewFile) {
-            $kind.SelectedIndex=1; $dialog.ShowInTaskbar=$false; $dialog.StartPosition='Manual'; $dialog.Location=[Drawing.Point]::new(-30000,-30000); $dialog.Opacity=0; $dialog.Show()
-            [Windows.Forms.Application]::DoEvents()
-            if($save.Bottom -gt $panel.ClientSize.Height) { throw 'Credential dialog action is clipped.' }
-            $bitmap=[Drawing.Bitmap]::new($dialog.Width,$dialog.Height)
-            try { $dialog.DrawToBitmap($bitmap,[Drawing.Rectangle]::new(0,0,$dialog.Width,$dialog.Height)); $bitmap.Save($PreviewFile,[Drawing.Imaging.ImageFormat]::Png) } finally { $bitmap.Dispose() }
-            $dialog.Hide()
-        } else { [void]$dialog.ShowDialog($form) }
-    } finally { $password.Clear(); $username.Clear(); $dialog.Dispose() }
+function Refresh-Reports {
+    $script:catalog=@(Get-ScriptCatalog $ScriptsRoot | Sort-Object DisplayName)
+    $list.Items.Clear();foreach($item in $script:catalog){[void]$list.Items.Add($item)}
+    if($list.Items.Count){$list.SelectedIndex=0}
+    Update-LoginState
 }
-$credentials.Add_Click({Show-CredentialDialog})
-$forget.Add_Click({Clear-LauncherSession $script:session; $script:session=New-LauncherSession; $status.Text='All app-owned sessions disconnected and credentials cleared.'; $connectionState.Text='Disconnected. Click Login to 365 to discover your account and organization.';$tenantBox.Clear();$clientBox.Clear();$spoBox.Clear();$advancedToggle.Checked=$false;$reportText.Clear();$jsonText.Clear();$grid.DataSource=$null;$script:lastReport=$null;$open.Enabled=$false})
-$login.Add_Click({$tabs.SelectedTab=$loginTab;if(-not $script:session.SharedGraph.Ready){Start-M365Operation 'SignIn'}})
-$tabs.Add_SelectedIndexChanged({
-    if($tabs.SelectedTab -eq $loginTab){$selectedTitle.Text='Microsoft 365 sessions';$selectedHint.Text='Verify the customer tenant once, then reuse read-only connections across reports.'}
-    elseif($list.SelectedItem){$selectedTitle.Text=$list.SelectedItem.DisplayName;$selectedHint.Text=if($list.SelectedItem.Manifest.readOnly){'Read-only report  ·  '+$list.SelectedItem.Name}else{'Write-capable Halo extension  ·  Launcher prepares local files only'}}
-})
-function Start-M365Operation([string]$Operation) {
-    if($null -ne $script:job){return}
-    if($Operation -eq 'Install') {
-        if([Windows.Forms.MessageBox]::Show('Install pinned Microsoft Graph Authentication, Exchange Online, Az.Accounts and SharePoint modules from the official PowerShell Gallery for this Windows user? Package licenses are accepted for this explicit local setup. No tenant changes or sign-in are performed.','Install prerequisites','YesNo','Question') -ne 'Yes'){return}
+function Show-Report {
+    $json.Text=Get-Content -LiteralPath $script:lastReport.JsonPath -Raw
+    Set-LauncherTechnicalDetails $report (Get-Content -LiteralPath $script:lastReport.MarkdownPath -Raw)
+    $data=$json.Text | ConvertFrom-Json -AsHashtable;$table=[Data.DataTable]::new()
+    $rows=@($data.records | Select-Object -First 5000)
+    $item=$script:catalog | Where-Object {$_.Manifest.id -eq $data.tool} | Select-Object -First 1
+    $columns=if($item -and $item.Manifest.output.ContainsKey('primaryColumns')){@($item.Manifest.output.primaryColumns)}else{@($rows | ForEach-Object {$_.Keys} | Select-Object -Unique)}
+    foreach($name in $columns){[void]$table.Columns.Add([string]$name,[string])}
+    foreach($record in $rows){$row=$table.NewRow();foreach($name in $columns){$value=$record[$name];$row[$name]=if($null -eq $value){''}elseif($value -is [string] -or $value -is [ValueType]){[string]$value}else{ConvertTo-Json -InputObject $value -Depth 50 -Compress}};$table.Rows.Add($row)}
+    $grid.DataSource=$table;$tabs.SelectedTab=$tableTab
+}
+function Start-Operation([string]$Action) {
+    if($script:job){return}
+    if($Action -notin @('Login','Install') -and -not (Test-LoggedIn)){$status.Text='Please login to 365.';Update-LoginState;return}
+    $options=@{Tenant=$tenantBox.Text.Trim();Client=$clientBox.Text.Trim();Extended=$extended.Checked;SharePointUrl=$spoBox.Text.Trim()}
+    if($Action -eq 'RegisterApp'){
+        if([Windows.Forms.MessageBox]::Show('Create a secretless public reader app in the verified tenant? This explicit setup requests registration permission, configures delegated read scopes, and disconnects the reader session. It does not grant consent or roles.','Review app registration','YesNo','Question') -ne 'Yes'){return}
     }
-    if($Operation -in @('SignIn','RegisterApp')){$script:lastReport=$null;$reportText.Clear();$jsonText.Clear();$grid.DataSource=$null;$open.Enabled=$false}
-    if($Operation -eq 'RegisterApp') {
-        $answer=[Windows.Forms.MessageBox]::Show('Create one single-tenant public client named powershell-ui (read-only), with delegated reader permissions and localhost redirect, without secrets? Setup requires separate registration permission and ends the Graph reader session. It does not grant consent or change tenant roles. Existing matches are reused without modification.','Review app registration','YesNo','Question')
-        if($answer -ne 'Yes'){return}
+    if($Action -eq 'Install'){
+        if([Windows.Forms.MessageBox]::Show('Install the pinned Graph Authentication, Exchange and SharePoint modules for this Windows user from the official PowerShell Gallery and accept their package licenses? No tenant settings are changed.','Local prerequisites','YesNo','Question') -ne 'Yes'){return}
     }
-    $operationOptions=@{Tenant=$tenantBox.Text.Trim();Client=$clientBox.Text.Trim();Extended=$extended.Checked;SharePointUrl=$spoBox.Text.Trim()}
-    if($Operation -eq 'SearchLogs') {
-        $picker=[Windows.Forms.FolderBrowserDialog]::new();$picker.Description='Select the completed log download folder containing log-download.json'
-        try {if($picker.ShowDialog($form) -ne 'OK'){return};$operationOptions.Folder=$picker.SelectedPath}finally{$picker.Dispose()}
-        $prompt=[Windows.Forms.Form]::new();$prompt.Text='Search downloaded logs';$prompt.Size=[Drawing.Size]::new(650,210);$prompt.StartPosition='CenterParent';$prompt.Font=$form.Font
-        $label=[Windows.Forms.Label]::new();$label.Text='What issue, error code, user, IP or correlation ID are you looking for?';$label.AutoSize=$true;$label.Location=[Drawing.Point]::new(15,15)
-        $query=[Windows.Forms.TextBox]::new();$query.Location=[Drawing.Point]::new(15,50);$query.Width=595
-        $ok=[Windows.Forms.Button]::new();$ok.Text='Search locally';$ok.Location=[Drawing.Point]::new(15,95);$ok.Width=170;$ok.DialogResult='OK';$prompt.AcceptButton=$ok;$prompt.Controls.AddRange(@($label,$query,$ok))
-        try {if($prompt.ShowDialog($form) -ne 'OK' -or -not $query.Text.Trim()){return};$operationOptions.Query=$query.Text.Trim()}finally{$prompt.Dispose()}
+    if($Action -eq 'Report'){
+        $item=$list.SelectedItem;if(-not $item -or $item.Errors.Count){return}
+        $options.Parameters=@{}
+        foreach($parameter in $item.Parameters){$input=$script:inputs[$parameter.name];$options.Parameters[$parameter.name]=if($parameter.type -eq 'boolean'){$input.Checked}elseif($parameter.type -eq 'integer'){[int]$input.Value}else{$input.Text.Trim()}}
+        $options.Manifest=$item.Manifest;$options.Entry=$item.Path;$options.Hash=$item.Hash
     }
-    $script:jobKind=$Operation;$script:worker=[powershell]::Create()
+    if($Action -eq 'SearchLogs'){
+        $picker=[Windows.Forms.FolderBrowserDialog]::new();$picker.Description='Choose a report folder containing log-download.json'
+        try{if($picker.ShowDialog($form) -ne 'OK'){return};$options.Folder=$picker.SelectedPath}finally{$picker.Dispose()}
+        Add-Type -AssemblyName Microsoft.VisualBasic
+        $options.Query=[Microsoft.VisualBasic.Interaction]::InputBox('Which issue, error code, account, IP or correlation ID should be searched locally?','Search downloaded logs','')
+        if(-not $options.Query){return}
+    }
+    if($Action -in @('Login','RegisterApp')){Clear-Results}
+    $script:action=$Action;$script:worker=[powershell]::Create()
     $code={
-        param($root,$context,$operation,$options,$outputRoot)
+        param($root,$context,$action,$options,$output)
         $ErrorActionPreference='Stop';Import-Module (Join-Path $root 'infrastructure/Launcher.psm1') -Force
-        switch($operation) {
-            'SignIn' {
+        switch($action){
+            'Login' {
                 $target=$options.Tenant
                 if(-not $target -and $options.Client -and $context.Tenant.Id){$target=$context.Tenant.Id}
-                $sameTenant=$target -and $target -in @($context.Tenant.Id,$context.Tenant.Domain)
-                if(-not $sameTenant){Clear-LauncherSession $context}
+                Clear-LauncherSession $context
                 Connect-M365Session $context -TenantId $target -ClientId $options.Client -Extended:$options.Extended
             }
-            'FindApp' { if(-not $context.SharedGraph.Ready){Connect-M365Session $context -TenantId $options.Tenant -ClientId $options.Client -Extended:$options.Extended | Out-Null};Find-M365ReaderApplication $context }
-            'RegisterApp' {
-                $target=if($options.Tenant){$options.Tenant}else{$context.Tenant.Id}
-                if(-not $target){throw 'Login to 365 first to discover the tenant, then choose Register reader app.'}
-                Disconnect-LauncherServices $context;Register-M365ReaderApplication $context -TenantId $target -CreateConfirmed
-            }
-            'Install' { & (Join-Path $root 'infrastructure/Install-M365Dependencies.ps1');'Local module prerequisites installed. Sign in when ready.' }
+            'Install' {& (Join-Path $root 'infrastructure/Install-M365Dependencies.ps1')}
+            'FindApp' {Find-M365ReaderApplication $context}
+            'RegisterApp' {$target=if($options.Tenant){$options.Tenant}else{$context.Tenant.Id};Disconnect-LauncherServices $context;Register-M365ReaderApplication $context -TenantId $target -CreateConfirmed}
+            'Report' {Invoke-LauncherAdapter $options.Manifest $options.Parameters $context $options.Entry $output $options.Hash}
             'SearchLogs' {
+                $download=Get-Content -LiteralPath (Join-Path $options.Folder 'log-download.json') -Raw | ConvertFrom-Json -AsHashtable
+                if($download.TenantId -ne $context.Tenant.Id){throw 'These logs belong to another tenant.'}
                 $result=& (Join-Path $root 'scripts/M365Security/Search-DownloadedLogs.ps1') -DownloadFolder $options.Folder -Query $options.Query
-                $directory=Join-Path $outputRoot ('log-search-'+[DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')+'-'+[guid]::NewGuid().ToString('N').Substring(0,8));[void][IO.Directory]::CreateDirectory($directory)
-                $manifest=@{id='local-log-search';name='Downloaded log search';purpose='Literal local search of downloaded logs; no network or sign-in.';source='Local verified JSONL files';readOnly=$true}
-                Write-LauncherReport $manifest @{Query=$options.Query} $result $(if($result.Summary.Incomplete){'Partial'}else{'Completed'}) $directory ([DateTime]::UtcNow)
+                $directory=Join-Path $output ('log-search-'+[guid]::NewGuid());[void][IO.Directory]::CreateDirectory($directory)
+                $manifest=@{id='local-log-search';name='Downloaded Microsoft 365 log search';purpose='Literal local search';readOnly=$true;source='Verified downloaded JSONL'}
+                Write-LauncherReport $manifest @{Query=$options.Query;TenantId=$context.Tenant.Id} $result $(if($result.Summary.Incomplete){'Partial'}else{'Completed'}) $directory ([DateTime]::UtcNow)
             }
-            default {if($operation -notin @('ExchangeOnline','Azure','SharePointOnline')){throw 'Unknown session operation.'};$context.Tenant.SharePointAdminUrl=$options.SharePointUrl;Connect-LauncherService $context -Service $operation}
+            default {
+                if($action -notin @('ExchangeOnline','SharePointOnline')){throw 'Unsupported Microsoft 365 operation.'}
+                $context.Tenant.SharePointAdminUrl=$options.SharePointUrl
+                Connect-LauncherService $context -Service $action
+            }
         }
     }
-    [void]$script:worker.AddScript($code).AddArgument($PSScriptRoot).AddArgument($script:session).AddArgument($Operation).AddArgument($operationOptions).AddArgument($OutputRoot)
-    $status.Text='Working: '+$Operation+'. Complete the Microsoft sign-in window when requested.'
-    $script:job=$script:worker.BeginInvoke();Set-Busy $true;$timer.Start()
+    [void]$script:worker.AddScript($code).AddArgument($PSScriptRoot).AddArgument($script:session).AddArgument($Action).AddArgument($options).AddArgument($OutputRoot)
+    $script:job=$script:worker.BeginInvoke();$status.Text=if($Action -eq 'Login'){'Please complete Microsoft sign-in. Reports unlock after tenant discovery.'}else{'Working: '+$Action}
+    Update-LoginState;$timer.Start()
 }
-$search.Add_TextChanged({Update-List}); $refresh.Add_Click({Refresh-Catalog})
-$list.Add_SelectedIndexChanged({
-    foreach($old in @($fields.Controls)) { $fields.Controls.Remove($old); $old.Dispose() }
-    $script:inputs=@{}; $item=$list.SelectedItem
-    Set-Busy ($null -ne $script:job)
-    if($null -eq $item) { $tabs.TabPages.Remove($installTab); $usage.Clear(); $details.Clear(); $selectedTitle.Text='Choose a report'; $selectedHint.Text='Select a report from the library.'; return }
-    $selectedTitle.Text=$item.DisplayName
-    $extensionTool=$item.Manifest.ContainsKey('kind') -and $item.Manifest.kind -eq 'browser-extension'
-    $interactiveGraph=$item.Manifest.ContainsKey('auth') -and $item.Manifest.auth -in @('Graph','GraphConditionalAccess')
-    if($extensionTool) { if(-not $tabs.TabPages.Contains($installTab)) { $tabs.TabPages.Insert(2,$installTab) } }
-    else { $tabs.TabPages.Remove($installTab) }
-    $selectedHint.Text=if($extensionTool){'Write-capable Halo extension  ·  Launcher prepares local files only'}else{'Read-only report  ·  '+$item.Name}
-    $run.Text=if($extensionTool){'Prepare extension'}else{'Run report'}
-    $memoryNote.Text=if($extensionTool){'Halo sign-in stays in the browser. Close the Halo manager to clear its token cache.'}elseif($interactiveGraph){'Microsoft sign-in starts when you run. Access tokens stay in this session and are cleared when you exit.'}else{'Read-only collection.'+[Environment]::NewLine+'Credentials stay in this session and are cleared when you exit.'}
-    if($item.Manifest.ContainsKey('guide')) { Set-LauncherGuide $usage $item.Manifest } else { Set-LauncherTechnicalDetails $usage $item.Usage }
-    Set-LauncherTechnicalDetails $details $item.Usage
-    if($item.Errors.Count) { Add-GuideParagraph $usage ('Report unavailable: '+($item.Errors -join '; ')) 'heading' }
-    $intro=[Windows.Forms.Label]::new(); $intro.AutoSize=$true; $intro.MaximumSize=[Drawing.Size]::new(650,0); $intro.ForeColor=$script:muted; $intro.Margin=[Windows.Forms.Padding]::new(0,0,0,12)
-    $intro.Text=if($extensionTool){'Enter your Halo address. This prepares local extension files only. Sign in to Halo in Edge or Chrome; no Halo password or browser token is handled by this launcher.'}elseif($interactiveGraph){'Enter your tenant and public client application ID below. Choose Run report, then follow the Microsoft sign-in address and code shown in Status and sign-in.'}else{'Enter the values below. Required fields define the account or system to read. Enter credentials separately using Session credentials.'}
-    $fields.Controls.Add($intro)
-    foreach($parameter in $item.Parameters) { Add-ParameterCard $parameter }
-    Update-ParameterLayout
-    $tabs.SelectedTab=$usageTab
-})
-function Show-ReportResult {
-            Set-LauncherTechnicalDetails $reportText (Get-Content -LiteralPath $script:lastReport.MarkdownPath -Raw)
-            $jsonText.Text=Get-Content -LiteralPath $script:lastReport.JsonPath -Raw
-            $data=$jsonText.Text | ConvertFrom-Json -AsHashtable
-            $table=[Data.DataTable]::new()
-            $rows=@($data.records | Select-Object -First 5000)
-            $reportCatalogItem=$script:catalog | Where-Object { $_.Manifest.id -eq $data.tool } | Select-Object -First 1
-            $primaryColumns=@()
-            if($reportCatalogItem -and $reportCatalogItem.Manifest.ContainsKey('output') -and $reportCatalogItem.Manifest.output.ContainsKey('primaryColumns')) { $primaryColumns=@($reportCatalogItem.Manifest.output.primaryColumns | Select-Object -Unique) }
-            if($primaryColumns.Count) {
-                foreach($key in $primaryColumns) { [void]$table.Columns.Add([string]$key,[string]) }
-            } else {
-                foreach($record in $rows) { foreach($key in $record.Keys) { if(-not $table.Columns.Contains($key)) { [void]$table.Columns.Add($key,[string]) } } }
-            }
-            foreach($record in $rows) {
-                $row=$table.NewRow()
-                foreach($column in $table.Columns) {
-                    $key=$column.ColumnName; $value=$record[$key]
-                    $row[$key]=if($null -eq $value) { '' } elseif($value -is [DateTime] -or $value -is [DateTimeOffset]) { $value.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ') } elseif($value -is [string] -or $value -is [ValueType]) { [string]$value } else { ConvertTo-Json -InputObject $value -Depth 50 -Compress }
-                }
-                $table.Rows.Add($row)
-            }
-            $grid.DataSource=$table
-            if($reportCatalogItem -and $reportCatalogItem.Manifest.ContainsKey('output') -and $reportCatalogItem.Manifest.output.ContainsKey('columnLabels')) {
-                foreach($column in $grid.Columns) {
-                    $label=$reportCatalogItem.Manifest.output.columnLabels[$column.Name]
-                    if($label) { $column.HeaderText=$label }
-                }
-            }
-            $gridTab.Text="Record table ($($rows.Count))"
-            $tabs.SelectedTab=if($data.status -in @('Completed','Partial') -and $reportCatalogItem -and $reportCatalogItem.Manifest.ContainsKey('output') -and $reportCatalogItem.Manifest.output.ContainsKey('defaultView') -and $reportCatalogItem.Manifest.output.defaultView -eq 'table') { $gridTab } else { $resultTab }
-
+function Stop-Operation {
+    if($script:session.SharedGraph.ActiveWorker){try{[void]$script:session.SharedGraph.ActiveWorker.BeginStop($null,$null)}catch{}}
+    foreach($entry in @($script:session.Services.Values)){if($entry.PSObject.Properties['ActiveWorker'] -and $entry.ActiveWorker){try{[void]$entry.ActiveWorker.BeginStop($null,$null)}catch{}}}
+    if($script:worker){$script:worker.Stop()}
 }
-function Copy-PreparedHaloExtension {
-    if(-not $script:lastReport -or $script:lastReport.Report.tool -ne 'halo-appointment-manager' -or $script:lastReport.Report.status -ne 'Completed') { throw 'Prepare the Halo extension first.' }
-    $receipt=Copy-HaloExtensionFiles -Preparation $script:lastReport.Report.summary -ExtensionsRoot $script:extensionsRoot -ReceiptDirectory (Split-Path -Parent $script:lastReport.JsonPath)
-    $script:extensionFolder=$receipt.folder; $installFolder.Text=$receipt.folder
-    $installStatus.Text=if($receipt.reusedExistingCopy){'The same files are already here. Select this folder in your browser using Load unpacked.'}elseif($receipt.preservedExistingFolder){'Copied to a new folder; the previous copy was preserved. Select the exact folder shown above using Load unpacked.'}else{'Files copied. Next, open your browser Extensions page and choose Load unpacked. Select the folder shown above.'}
-    $status.AppendText([Environment]::NewLine+'Extension folder: '+$receipt.folder)
-    $tabs.SelectedTab=$installTab
-}
-$timer=[Windows.Forms.Timer]::new(); $timer.Interval=300
+$timer=[Windows.Forms.Timer]::new();$timer.Interval=250
 $timer.Add_Tick({
-    $message=''
-    while($script:session.Progress.TryDequeue([ref]$message)) { $status.AppendText([Environment]::NewLine+$message) }
-    if($null -eq $script:job -or -not $script:job.IsCompleted) { return }
-    $timer.Stop()
+    $message='';while($script:session.Progress.TryDequeue([ref]$message)){$status.AppendText([Environment]::NewLine+$message)}
+    if(-not $script:job -or -not $script:job.IsCompleted){return}
+    $timer.Stop();$action=$script:action
     try {
         $items=$script:worker.EndInvoke($script:job)
-        if($script:jobKind -ne 'Report') {
-            if($script:jobKind -eq 'SearchLogs') {
-                $script:lastReport=$items | Where-Object {$_.PSObject.Properties.Name -contains 'JsonPath'} | Select-Object -Last 1
-                Show-ReportResult;$open.Enabled=$true
-            } else {
-                if($script:jobKind -eq 'RegisterApp' -and $items[-1].AppId){$clientBox.Text=$items[-1].AppId}
-                if($script:jobKind -eq 'FindApp') {
-                    $apps=@($items[-1].Items)
-                    if($items[-1].Status -ne 'Complete'){throw 'App search failed or was incomplete. Check directory read access.'}
-                    if($apps.Count -eq 1){$clientBox.Text=$apps[0].appId}
-                    $status.Text='Found '+$apps.Count+' matching reader applications. '+$(if($apps.Count -eq 1){'The application ID is selected; review its configuration before signing in.'}else{'Review/select matching applications in Entra. No application was changed.'})
-                }
-                if($script:session.SharedGraph.Ready) {
-                    $spoBox.Text=$script:session.Tenant.SharePointAdminUrl
-                    $connectionState.Text='Graph: connected'+[Environment]::NewLine+'Tenant: '+$script:session.Tenant.DisplayName+' ('+$script:session.Tenant.Id+')'+[Environment]::NewLine+'Account: '+$script:session.Tenant.Account
-                } else {$connectionState.Text='Graph disconnected. Choose Login to 365 after setup.'}
-                foreach($service in @(Get-LauncherServiceStatus $script:session)){$connectionState.AppendText([Environment]::NewLine+$service.Service+': '+$service.Status)}
-                if($script:jobKind -eq 'FindApp'){foreach($app in $apps){$connectionState.AppendText([Environment]::NewLine+$app.displayName+' | '+$app.appId+' | '+$app.ReviewStatus)}}
-                if($script:jobKind -eq 'RegisterApp'){$status.Text=$items[-1].Note}
-                elseif($script:jobKind -notin @('FindApp')){$status.Text='Completed: '+$script:jobKind}
-                $tabs.SelectedTab=$loginTab
-            }
-            return
-        }
-        $script:lastReport=$items | Where-Object { $_.PSObject.Properties.Name -contains 'JsonPath' } | Select-Object -Last 1
-        if($null -eq $script:lastReport) {
-            $fallbackDirectory=if($script:session.ContainsKey('RunDirectory') -and $script:session.RunDirectory) { $script:session.RunDirectory } else { Join-Path $OutputRoot ([DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')+'-'+[guid]::NewGuid().ToString('N').Substring(0,8)) }
-            [void](New-Item -ItemType Directory -Path $fallbackDirectory -Force)
-            $fallback=[pscustomobject]@{Summary='Collection did not complete.';Records=@();Limitations=@('No complete result is available. Partial native files must not be interpreted as a complete report.')}
-            $fallbackStatus=if($script:cancelled) { 'Cancelled' } else { 'Failed' }
-            $script:lastReport=Write-LauncherReport $script:activeManifest $script:activeParameters $fallback $fallbackStatus $fallbackDirectory $script:activeStarted 'Collection stopped before a completed report was returned.'
-        }
-        if($script:lastReport) {
-            Show-ReportResult
-            $status.AppendText([Environment]::NewLine+"$($script:lastReport.Report.status): $($script:lastReport.JsonPath)")
-            $open.Enabled=$true
-            if($script:lastReport.Report.tool -eq 'halo-appointment-manager' -and $script:lastReport.Report.status -eq 'Completed') {
-                $tabs.SelectedTab=$installTab
-                if($script:copyAfterPrepare) {
-                    try { Copy-PreparedHaloExtension }
-                    catch {
-                        $installStatus.Text='Copy failed: '+$_.Exception.Message
-                        $status.AppendText([Environment]::NewLine+$installStatus.Text)
-                    }
-                } else {
-                    $installStatus.Text='Package prepared. Choose Copy to C:\extensions below, then follow the browser installation steps. Open report folder shows the original package.'
-                }
-            } elseif($script:copyAfterPrepare) {
-                $installStatus.Text='Preparation did not complete. No files were copied to C:\extensions. See Report for details.'
-            }
-        } else { $status.AppendText([Environment]::NewLine+'No completed report was returned. Collection failed or was cancelled.') }
+        if($script:worker.HadErrors){throw $script:worker.Streams.Error[0]}
+        if($action -in @('Report','SearchLogs')){$script:lastReport=$items | Where-Object {$_.PSObject.Properties['JsonPath']} | Select-Object -Last 1;if(-not $script:lastReport){throw 'No report was returned.'};Show-Report;$status.Text=$script:lastReport.Report.status+': '+$script:lastReport.JsonPath}
+        elseif($action -eq 'FindApp'){$apps=@($items[-1].Items);if($items[-1].Status -ne 'Complete'){throw 'App search failed.'};if($apps.Count -eq 1){$clientBox.Text=$apps[0].appId};$status.Text=($apps | ForEach-Object {$_.displayName+' | '+$_.appId}) -join [Environment]::NewLine}
+        elseif($action -eq 'RegisterApp'){$clientBox.Text=$items[-1].AppId;$status.Text=$items[-1].Note+' Please login to 365 again.'}
+        else {$status.Text='Completed: '+$action;if($action -eq 'Login'){$spoBox.Text=$script:session.Tenant.SharePointAdminUrl;$status.Text='Logged in. Account and tenant details are saved in this session. Choose a Microsoft 365 report.'}}
     } catch {
-        if($script:jobKind -ne 'Report') {$status.Text='Operation failed. '+$_.Exception.Message;$connectionState.Text='Check prerequisites, sign-in, selected tenant and permissions. No successful connection is implied.';return}
-        $status.AppendText([Environment]::NewLine+'Collection stopped or failed before report creation. Do not interpret missing results as healthy.')
-        if($null -eq $script:lastReport -and $script:session.ContainsKey('RunDirectory') -and $script:session.RunDirectory) {
-            $fallback=[pscustomobject]@{Summary='Collection did not complete.';Records=@();Limitations=@('Cancelled or failed collection; no complete data is available.')}
-            $fallbackStatus=if($script:cancelled) { 'Cancelled' } else { 'Failed' }
-            $script:lastReport=Write-LauncherReport $script:activeManifest $script:activeParameters $fallback $fallbackStatus $script:session.RunDirectory $script:activeStarted 'Collection stopped before completion.'
-            Set-LauncherTechnicalDetails $reportText (Get-Content -LiteralPath $script:lastReport.MarkdownPath -Raw)
-            $jsonText.Text=Get-Content -LiteralPath $script:lastReport.JsonPath -Raw
-            $open.Enabled=$true; $tabs.SelectedTab=$resultTab
-        }
-    }
-    finally { $script:copyAfterPrepare=$false; $script:worker.Dispose(); $script:worker=$null; $script:job=$null;$script:jobKind='Report'; Set-Busy $false }
+        $status.Text=if($action -eq 'Login' -and $script:session.SharedGraph.LastError){$script:session.SharedGraph.LastError}else{'Operation could not complete. Verify this tenant, service connection and required read permissions. No successful or healthy result is implied.'}
+    } finally {$script:worker.Dispose();$script:worker=$null;$script:job=$null;$script:action='';Update-LoginState}
 })
-$run.Add_Click({
-    try {
-        $item=$list.SelectedItem
-        if($null -eq $item -or $item.Errors.Count) { throw 'Select a registered report or tool.' }
-        if($item.Manifest.ContainsKey('auth') -and $item.Manifest.auth -in @('M365','Graph','GraphConditionalAccess') -and -not $script:session.SharedGraph.Ready) {$tabs.SelectedTab=$loginTab;throw 'Choose Login to 365 and verify the customer tenant first.'}
-        $parameters=@{}
-        foreach($parameter in $item.Parameters) {
-            $control=$script:inputs[$parameter.name]
-            if($parameter.type -eq 'boolean') { $parameters[$parameter.name]=$control.Checked }
-            else {
-                $value=$control.Text.Trim()
-                if($parameter.required -and -not $value) { throw "Enter $($parameter.label)." }
-                if($value) { $parameters[$parameter.name]=if($parameter.type -eq 'integer') { [int]$value } elseif($parameter.type -eq 'file') { ConvertTo-LauncherFilePath $value $PSScriptRoot } else { $value } }
-            }
-        }
-        if($item.Manifest.ContainsKey('credentialKey') -and $item.Manifest.credentialKey -eq 'AzureServicePrincipal' -and -not $script:session.Credentials.ContainsKey('AzureServicePrincipal')) { throw 'Use Session credentials to enter the Azure application ID and client secret first.' }
-        $script:activeManifest=$item.Manifest; $script:activeParameters=$parameters; $script:activeStarted=[DateTime]::UtcNow; $script:cancelled=$false; $script:session.RunDirectory=''
-        $script:jobKind='Report'
-        $script:worker=[powershell]::Create()
-        $workerCode={
-            param($module,$manifest,$parameters,$context,$entry,$outputRoot,$hash)
-            $ErrorActionPreference='Stop'
-            Import-Module $module -Force
-            Invoke-LauncherAdapter -Manifest $manifest -Parameters $parameters -Context $context -EntryPath $entry -OutputRoot $outputRoot -ExpectedHash $hash
-        }
-        [void]$script:worker.AddScript($workerCode).AddArgument((Join-Path $PSScriptRoot 'infrastructure/Launcher.psm1')).AddArgument($item.Manifest).AddArgument($parameters).AddArgument($script:session).AddArgument($item.Path).AddArgument($OutputRoot).AddArgument($item.Hash)
-        $script:lastReport=$null; $open.Enabled=$false; $reportText.Clear(); $jsonText.Clear(); $grid.DataSource=$null
-        $status.Text=if($item.Manifest.ContainsKey('kind') -and $item.Manifest.kind -eq 'browser-extension'){'Preparing the Halo extension locally. No Halo appointments are being read or changed.'}else{'Collecting read-only data. Microsoft sign-in instructions will appear here when needed.'}
-        $tabs.SelectedTab=$resultTab
-        $script:job=$script:worker.BeginInvoke(); Set-Busy $true; $timer.Start()
-    } catch {
-        if($script:worker -and $null -eq $script:job) { $script:worker.Dispose(); $script:worker=$null }
-        $script:copyAfterPrepare=$false
-        [void][Windows.Forms.MessageBox]::Show($_.Exception.Message,'Report parameters')
-    }
-})
-$copyExtension.Add_Click({
-    if($null -ne $script:job -or -not $run.Enabled -or $list.SelectedItem.Manifest.id -ne 'halo-appointment-manager') { return }
-    $script:copyAfterPrepare=$true
-    $installStatus.Text='Preparing the package, then copying it to C:\extensions. No browser installation or Halo changes are being made.'
-    $run.PerformClick()
-})
-$openExtension.Add_Click({
-    if($script:extensionFolder -and (Test-Path -LiteralPath $script:extensionFolder -PathType Container)) { Start-Process explorer.exe -ArgumentList @($script:extensionFolder) }
-})
-function Stop-Report {
-    if($null -eq $script:worker) { return }
-    $script:cancelled=$true
-    if($script:session.SharedGraph.ActiveWorker) {try{[void]$script:session.SharedGraph.ActiveWorker.BeginStop($null,$null)}catch{}}
-    foreach($entry in @($script:session.Services.Values)) {if($entry.PSObject.Properties['ActiveWorker'] -and $entry.ActiveWorker){try{[void]$entry.ActiveWorker.BeginStop($null,$null)}catch{}}}
-    foreach($process in $script:session.NativeProcesses) { try { if(-not $process.HasExited) { $process.Kill($true) } } catch {} }
-    $script:worker.Stop()
-}
-$stop.Add_Click({Stop-Report; $status.AppendText([Environment]::NewLine+'Cancelled. Partial native files, if any, are not a completed report.')})
-$open.Add_Click({if($script:lastReport){Start-Process explorer.exe -ArgumentList @('/select,',$script:lastReport.JsonPath)}})
-$form.Add_FormClosing({Stop-Report})
-Refresh-Catalog
-$tabs.SelectedTab=$loginTab
+$login.Add_Click({$tabs.SelectedTab=$loginTab;if(-not (Test-LoggedIn)){Start-Operation 'Login'}})
+$signIn.Add_Click({Start-Operation 'Login'})
+$install.Add_Click({Start-Operation 'Install'})
+$logout.Add_Click({Clear-LauncherSession $script:session;$script:session=New-LauncherSession;$tenantBox.Clear();$clientBox.Clear();$spoBox.Clear();$advanced.Checked=$false;Clear-Results;$status.Text='Please login to 365.';Update-LoginState})
+$refresh.Add_Click({Refresh-Reports})
+$list.Add_SelectedIndexChanged({Set-Parameters})
+$run.Add_Click({Start-Operation 'Report'})
+$cancel.Add_Click({Stop-Operation})
+$open.Add_Click({if((Test-LoggedIn) -and $script:lastReport){Start-Process explorer.exe -ArgumentList @('/select,',$script:lastReport.JsonPath)}})
+$tabs.Add_Selecting({param($sender,$e) if(-not (Test-LoggedIn) -and $e.TabPage -ne $loginTab){$e.Cancel=$true}})
+$form.Add_FormClosing({Stop-Operation})
+Refresh-Reports;Update-LoginState
 try {
-    if($VerifyUi) {
-        if(@($script:catalog | Where-Object {$_.Errors.Count -eq 0}).Count -ne 8) { throw 'Expected eight registered tools. Unregistered local tools must stay disabled.' }
-        for($index=0;$index -lt $list.Items.Count;$index++) {
-            $list.SelectedIndex=$index
-            if($list.SelectedItem.Errors.Count) {if($run.Enabled){throw 'An unregistered tool was enabled.'};continue}
-            if(-not $run.Enabled -or $script:inputs.Count -eq 0) { throw 'Manifest parameter controls or integrity gate failed.' }
-            if($list.SelectedItem.Manifest.id -eq 'halo-appointment-manager' -and ($run.Text -ne 'Prepare extension' -or $selectedHint.Text -notmatch 'Write-capable')) { throw 'Halo preparation must be clearly labelled as a write-capable extension, not a read-only scan.' }
-            if($tabs.TabPages.Contains($installTab) -ne ($list.SelectedItem.Manifest.id -eq 'halo-appointment-manager')) { throw 'Extension installation tab is not scoped to the Halo tool.' }
-            if($usage.Text -notmatch 'Before you start' -or $usage.Rtf -notmatch '\\pntext') { throw 'Readable guide headings or bullets missing.' }
-            foreach($parameter in $list.SelectedItem.Parameters) {
-                $editor=$script:inputs[$parameter.name]
-                if($parameter.type -eq 'file' -and ($editor.Text -match '/' -or -not [IO.Path]::IsPathFullyQualified($editor.Text))) { throw 'Executable default must be a consistent absolute Windows path.' }
-                if($parameter.type -eq 'integer' -and $editor -isnot [Windows.Forms.NumericUpDown]) { throw 'Integer parameter needs a numeric editor.' }
-                if($parameter.ContainsKey('maximum') -and $editor.Maximum -ne $parameter.maximum) { throw 'Declared parameter maximum was not applied.' }
-            }
+    if($VerifyUi){
+        if($script:catalog.Count -ne 4 -or @($script:catalog | Where-Object {$_.Errors.Count}).Count){throw 'Expected four valid Microsoft 365 reports.'}
+        if($list.Enabled -or $run.Enabled -or $logout.Enabled -or $actions['FindApp'].Enabled -or $identity.Text -ne 'Not logged in'){throw 'Unauthenticated controls were not locked.'}
+        $form.ShowInTaskbar=$false;$form.StartPosition='Manual';$form.Location=[Drawing.Point]::new(-30000,-30000);$form.Opacity=0;$form.Show()
+        $saved=(Get-Command Start-Operation).ScriptBlock;$script:clicked=''
+        try{Set-Item Function:\Start-Operation {param($Action) $script:clicked=$Action};$login.PerformClick();if($script:clicked -ne 'Login' -or $tenantBox.Text){throw 'One-click discovery failed.'}}finally{Set-Item Function:\Start-Operation $saved}
+        $script:session.SharedGraph.Ready=$true;$script:session.SharedGraph.TenantId='00000000-0000-0000-0000-000000000001'
+        $script:session.Tenant.Id=$script:session.SharedGraph.TenantId;$script:session.Tenant.Account='reader@fixture.example';$script:session.Tenant.DisplayName='Synthetic organization'
+        Update-LoginState
+        if(-not $list.Enabled -or -not $run.Enabled -or $identity.Text -notmatch 'Logged in as reader@fixture.example'){throw 'Authenticated controls or identity banner failed.'}
+        foreach($item in $script:catalog){$list.SelectedItem=$item;if(-not $script:inputs.Count -or $guide.Text -notmatch 'Before you start' -or -not $directions.Text.Trim()){throw 'Manifest UI failed.'}}
+        $fixture=Join-Path ([IO.Path]::GetTempPath()) ('m365-ui-fixture-'+[guid]::NewGuid())
+        [void][IO.Directory]::CreateDirectory($fixture)
+        try{
+            $manifest=($script:catalog | Where-Object {$_.Manifest.id -eq 'service-inventory'}).Manifest
+            $evidence=[pscustomobject]@{Summary=[pscustomobject]@{Count=1;Incomplete=$false};Records=@([pscustomobject]@{Service='ExchangeOnline';Collection='Fixture evidence';Id='fixture-record-1'});Limitations=@('Synthetic UI verification only.')}
+            $script:lastReport=Write-LauncherReport $manifest @{TenantId=$script:session.Tenant.Id} $evidence 'Completed' $fixture ([DateTime]::UtcNow)
+            Show-Report;[Windows.Forms.Application]::DoEvents()
+            if($grid.Rows.Count -ne 1 -or $grid.Rows[0].Cells['Id'].Value -ne 'fixture-record-1' -or $json.Text -notmatch 'fixture-record-1' -or $report.Text -notmatch 'Instructions for an LLM'){throw 'Report evidence did not reach all UI views.'}
+        }finally{
+            Clear-Results
+            $resolved=[IO.Path]::GetFullPath($fixture);$tempBase=[IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+            if(-not $resolved.StartsWith($tempBase,[StringComparison]::OrdinalIgnoreCase) -or (Split-Path $resolved -Leaf) -notlike 'm365-ui-fixture-*'){throw 'Unexpected UI fixture cleanup path.'}
+            Remove-Item -LiteralPath $resolved -Recurse -Force
         }
-        # Exercise the actual button and asynchronous completion in a temporary directory.
-        # Verification never writes to the user's C:\extensions or opens a browser.
-        $copyFixture=Join-Path ([IO.Path]::GetTempPath()) ('launcher-copy-'+[guid]::NewGuid())
-        $savedOutputRoot=$OutputRoot
-        try {
-            $OutputRoot=Join-Path $copyFixture 'reports'; $script:extensionsRoot=Join-Path $copyFixture 'extensions'
-            $list.SelectedIndex=@($list.Items | ForEach-Object {$_.Manifest.id}).IndexOf('halo-appointment-manager')
-            $script:inputs.HaloUrl.Text='https://halo.ui-fixture.example'
-            $form.ShowInTaskbar=$false; $form.StartPosition='Manual'; $form.Location=[Drawing.Point]::new(-30000,-30000); $form.Opacity=0
-            $form.Show(); $tabs.SelectedTab=$installTab; [Windows.Forms.Application]::DoEvents()
-            $savedDispatcher=(Get-Command Start-M365Operation).ScriptBlock
-            $script:authClickFixture=''
-            try {
-                Set-Item -LiteralPath Function:\Start-M365Operation -Value {param([string]$Operation) $script:authClickFixture=$Operation}
-                $login.PerformClick()
-                if($script:authClickFixture -ne 'SignIn' -or $tenantBox.Text -or $clientBox.Text -or $advancedToggle.Checked) {throw 'Default Login to 365 must directly start authentication without asking for tenant or app input.'}
-            } finally {Set-Item -LiteralPath Function:\Start-M365Operation -Value $savedDispatcher}
-            $tabs.SelectedTab=$installTab
-            $copyExtension.PerformClick()
-            if($null -eq $script:job) { throw 'Copy button did not start preparation.' }
-            $deadline=[DateTime]::UtcNow.AddSeconds(20)
-            while($null -ne $script:job -and [DateTime]::UtcNow -lt $deadline) { [Windows.Forms.Application]::DoEvents(); [Threading.Thread]::Sleep(25) }
-            if($null -ne $script:job) { throw 'Extension copy button timed out.' }
-            $expectedFolder=Join-Path $script:extensionsRoot 'HaloAppointmentManager'
-            if($script:extensionFolder -ne $expectedFolder -or $installFolder.Text -ne $expectedFolder -or $tabs.SelectedTab -ne $installTab -or -not $openExtension.Enabled) { throw ('Extension destination or copy UI failed: '+$installStatus.Text) }
-            $copiedManifest=Get-Content -LiteralPath (Join-Path $expectedFolder 'manifest.json') -Raw | ConvertFrom-Json -AsHashtable
-            if($copiedManifest.host_permissions[0] -ne 'https://halo.ui-fixture.example/*') { throw 'Copy button did not use the current Halo address.' }
-            $copyReceipt=Get-Content -LiteralPath (Join-Path (Split-Path -Parent $script:lastReport.JsonPath) 'extension-copy.json') -Raw | ConvertFrom-Json
-            if($copyReceipt.operation -ne 'CopyExtensionFiles' -or $copyReceipt.browserInstalled -or $copyReceipt.liveHaloRequests -ne 0) { throw 'Copy receipt incorrectly claims installation or Halo activity.' }
-        } finally {
-            Stop-Report; $form.Hide(); $OutputRoot=$savedOutputRoot; $script:extensionsRoot='C:\extensions'
-            $script:extensionFolder=''; $script:lastReport=$null; $installFolder.Text='C:\extensions\HaloAppointmentManager'
-            $installStatus.Text='Not copied yet. The button below creates the directory and copies the extension files. Browser installation is manual.'
-            $status.Text='Choose a tool, read its guide, then enter parameters.'; $open.Enabled=$false
-            Set-Busy $false
-            $resolved=[IO.Path]::GetFullPath($copyFixture); $tempBase=[IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-            if(-not $resolved.StartsWith($tempBase,[StringComparison]::OrdinalIgnoreCase) -or (Split-Path $resolved -Leaf) -notlike 'launcher-copy-*') { throw 'Unexpected copy test cleanup path.' }
-            if(Test-Path -LiteralPath $resolved) { Remove-Item -LiteralPath $resolved -Recurse -Force }
+        if($PreviewPath){[void][IO.Directory]::CreateDirectory($PreviewPath)}
+        foreach($view in @('logged-in','locked','locked-compact')){
+            if($view -like 'locked*'){$script:session.SharedGraph.Ready=$false;Update-LoginState}
+            if($view -eq 'locked-compact'){$form.Size=$form.MinimumSize}
+            $tabs.SelectedTab=$loginTab;$form.PerformLayout();[Windows.Forms.Application]::DoEvents()
+            if($header.Right -gt $layout.ClientSize.Width -or $identity.Right -gt $header.Width){throw 'The login identity banner extends beyond the window.'}
+            if($PreviewPath){$bitmap=[Drawing.Bitmap]::new($form.Width,$form.Height);try{$form.DrawToBitmap($bitmap,[Drawing.Rectangle]::new(0,0,$form.Width,$form.Height));$bitmap.Save((Join-Path $PreviewPath ($view+'.png')))}finally{$bitmap.Dispose()}}
         }
-        $displayFixture=Join-Path ([IO.Path]::GetTempPath()) ('launcher-display-'+[guid]::NewGuid())
-        [void](New-Item -ItemType Directory -Path $displayFixture)
-        try {
-            $fixtureManifest=@{id='display-fixture';name='Synthetic display';purpose='Offline display verification';source='test'}
-            $fixtureResult=[pscustomobject]@{Summary='Synthetic fixture';Records=@([pscustomobject]@{Id='display-1';Name='Example';Data=@{Healthy=$true}});Limitations=@('Synthetic, not tenant data.')}
-            $script:lastReport=Write-LauncherReport $fixtureManifest @{} $fixtureResult 'Completed' $displayFixture ([DateTime]::UtcNow)
-            Show-ReportResult
-            if($grid.DataSource.Rows.Count -ne 1 -or $reportText.Text -notmatch 'Synthetic fixture' -or $jsonText.Text -notmatch 'display-1') { throw 'Report display failed.' }
-            $historyManifest=($script:catalog | Where-Object { $_.Manifest.id -eq 'windows-reboot-history' }).Manifest
-            $historyResult=[pscustomobject]@{
-                Summary='Synthetic reboot table';Records=@([pscustomobject]@{
-                    StartedUtc='2026-01-01T12:00:00Z';Classification='Uncertain';ErrorStatus='Unknown or incomplete';NearbyErrorCount=0
-                    WindowsReason='Fixture';RequestedBy='';Id='history-display-fixture';Evidence=@(@{RecordId=7;EventId=12})
-                });Limitations=@('Synthetic, not machine data.')
-            }
-            $script:lastReport=Write-LauncherReport $historyManifest @{} $historyResult 'Partial' $displayFixture ([DateTime]::UtcNow)
-            Show-ReportResult
-            if($grid.Columns.Count -ne 6 -or $grid.Columns.Contains('Evidence') -or $grid.Columns['StartedUtc'].HeaderText -ne 'Started (UTC)' -or $grid.DataSource.Rows[0]['StartedUtc'] -notmatch '^2026-01-01T12:00:00.*Z$' -or $tabs.SelectedTab -ne $gridTab -or $jsonText.Text -notmatch 'history-display-fixture') { throw 'Compact reboot table, UTC timestamps, automatic view or full JSON evidence failed.' }
-        } finally {
-            Remove-Item -LiteralPath (Join-Path $displayFixture 'report.json'),(Join-Path $displayFixture 'report.md') -Force
-            Remove-Item -LiteralPath $displayFixture
-            $script:lastReport=$null
-        }
-        if($PreviewPath) {
-            # Render this application's own controls offscreen using synthetic data only.
-            [void][IO.Directory]::CreateDirectory($PreviewPath)
-            $list.SelectedIndex=@($list.Items | ForEach-Object {$_.Manifest.id}).IndexOf('azqr-readonly')
-            $gridTab.Text='Record table'
-            $form.ShowInTaskbar=$false; $form.StartPosition='Manual'; $form.Location=[Drawing.Point]::new(-30000,-30000); $form.Opacity=0
-            $form.Show(); [Windows.Forms.Application]::DoEvents()
-            foreach($view in @('guide','parameters','compact','reboot-parameters','reboot-table','halo-guide','halo-parameters','halo-install','halo-install-compact','ca-guide','ca-parameters','ca-compact','login','login-compact')) {
-                if($view -like 'reboot-*') {
-                    $form.Size=[Drawing.Size]::new(1320,930)
-                    $list.SelectedIndex=@($list.Items | ForEach-Object {$_.Manifest.id}).IndexOf('windows-reboot-history')
-                }
-                if($view -like 'halo-*') {
-                    $form.Size=[Drawing.Size]::new(1320,930)
-                    $list.SelectedIndex=@($list.Items | ForEach-Object {$_.Manifest.id}).IndexOf('halo-appointment-manager')
-                }
-                if($view -like 'ca-*') {
-                    $form.Size=[Drawing.Size]::new(1320,930)
-                    $list.SelectedIndex=@($list.Items | ForEach-Object {$_.Manifest.id}).IndexOf('conditional-access')
-                }
-                $tabs.SelectedTab=if($view -like 'login*'){$loginTab}elseif($view -in @('guide','halo-guide','ca-guide')){$usageTab}elseif($view -like 'halo-install*'){$installTab}elseif($view -eq 'reboot-table'){$gridTab}else{$paramTab}
-                if($view -eq 'login'){$form.Size=[Drawing.Size]::new(1320,930)}
-                if($view -in @('compact','halo-install-compact','ca-compact','login-compact')) { $form.Size=$form.MinimumSize }
-                $null=$form.Handle
-                $form.PerformLayout(); $rootLayout.PerformLayout(); $split.PerformLayout(); $content.PerformLayout(); $tabs.PerformLayout(); $fields.PerformLayout()
-                Update-ParameterLayout
-                [Windows.Forms.Application]::DoEvents()
-                if($tabs.Right -gt $content.ClientSize.Width -or $status.Right -gt $bottom.ClientSize.Width) { throw 'Content extends beyond the resized window.' }
-                foreach($card in $fields.Controls) { if($card.Right -gt $fields.ClientSize.Width) { throw 'A parameter field extends beyond its panel.' } }
-                $bitmap=[Drawing.Bitmap]::new($form.Width,$form.Height)
-                try { $form.DrawToBitmap($bitmap,[Drawing.Rectangle]::new(0,0,$form.Width,$form.Height)); $bitmap.Save((Join-Path $PreviewPath ("launcher-$view.png")),[Drawing.Imaging.ImageFormat]::Png) } finally { $bitmap.Dispose() }
-            }
-            Show-CredentialDialog -PreviewFile (Join-Path $PreviewPath 'launcher-credentials.png')
-            $form.Hide()
-        }
-        'PASS: eight manifests, shared Microsoft 365 controls, formatted guides, parameters, integrity, report/table/JSON and actual async extension copy button. Offline verification only.'
-    } else { [void]$form.ShowDialog() }
-} finally {
-    try {
-        Stop-Report
-        if($script:worker) { $script:worker.Dispose() }
-        if($null -ne $script:job -and $script:session.ContainsKey('RunDirectory') -and $script:session.RunDirectory -and -not(Test-Path -LiteralPath (Join-Path $script:session.RunDirectory 'report.json'))) {
-            $cancelled=[pscustomobject]@{Summary='Launcher closed before collection completed.';Records=@();Limitations=@('Cancelled collection. No complete data is available.')}
-            [void](Write-LauncherReport $script:activeManifest $script:activeParameters $cancelled 'Cancelled' $script:session.RunDirectory $script:activeStarted 'Launcher closed before completion.')
-        }
-    } finally {
-        Clear-LauncherSession $script:session
-        $script:session=$null; $timer.Dispose(); $form.Dispose()
-    }
-}
-
-
+        if($list.Enabled -or $run.Enabled -or $identity.Text -ne 'Not logged in'){throw 'Expired session did not relock controls.'}
+        $form.Hide()
+        'PASS: four Microsoft 365 tools, login-first gating, direct login action, saved identity banner, manifest inputs, table/JSON/readable report views and relock after authentication loss. No live sign-in.'
+    } else {[void]$form.ShowDialog()}
+} finally {Stop-Operation;Clear-LauncherSession $script:session;$timer.Dispose();$form.Dispose()}

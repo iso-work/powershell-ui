@@ -1,3 +1,0 @@
-[submodule "internal/graph/aprl"]
-	path = internal/graph/aprl
-	url = https://github.com/Azure/Azure-Proactive-Resiliency-Library-v2.git

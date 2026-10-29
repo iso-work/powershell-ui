@@ -12,7 +12,7 @@
       "type": "boolean",
       "required": false,
       "default": false,
-      "help": "Also requests DeviceManagementManagedDevices.Read.All and reads a restricted set of device inventory fields. Device names are included; recovery/bypass codes and user contact details are excluded."
+      "help": "Reads a restricted set of device inventory fields using the shared 365 session. Select Extended read permissions before login for DeviceManagementManagedDevices.Read.All. Device names are included; recovery/bypass codes and user contact details are excluded."
     }
   ],
   "source": {
@@ -31,19 +31,20 @@
     "notes": [
       "No policy or tenant setting is changed.",
       "This is a scoped inventory. It does not include assignments, effective policy or every settings catalog value.",
-      "Microsoft sign-in is separate from saved directory and Azure application credentials. Its access token is reused in launcher memory and cleared on exit."
+      "The shared Graph SDK session and discovered tenant are reused across reports. Logout / clear session or closing the launcher disconnects its session; independent Microsoft/browser sign-in sessions are separate.",
+      "Find reader app is read-only. Register reader app is a separate, explicitly confirmed setup action; administrators review consent and roles separately."
     ],
     "prerequisites": [
-      "Choose Login to 365 once and verify the customer tenant. Enable Extended reads for optional references or Intune collection.",
-      "Your Microsoft Entra tenant ID or verified tenant domain, such as contoso.onmicrosoft.com.",
-      "The application ID of an existing public client registration configured for device-code sign-in.",
+      "Windows, PowerShell 7, the Microsoft.Graph.Authentication module and access to public Microsoft Graph. Use the separate local dependency installer if the module is missing.",
+      "Select Extended read permissions before Login to 365 for Intune collection. Complete the normal Microsoft login window; the launcher discovers your username and tenant before it unlocks reports.",
+      "No username, tenant ID, application ID or device code is required in report parameters. The default Microsoft Graph PowerShell client is available without creating a custom app.",
       "The read permissions listed in Technical details, an Intune license, and an account with visibility into the intended scope."
     ],
     "steps": [
-      "Choose Login to 365; the verified tenant and application are reused automatically. No tenant/application entry is needed for each report.",
+      "Choose Login to 365 and verify Logged in as and the displayed customer tenant. The verified session is reused across reports.",
       "Optionally select Include managed device inventory.",
-      "Choose Run report. Sign-in instructions and a one-time code will appear in the status area.",
-      "Complete Microsoft sign-in in your browser, then return to the launcher for the report."
+      "Choose Run report. Collection uses the existing session; Microsoft may require another normal login if tenant policy or session expiry requires it.",
+      "Review Report and Record table, then use Open report folder for the readable and structured output. Inspect incomplete collections before drawing conclusions."
     ],
     "overview": "Review Intune configuration profiles, compliance policies, applications and settings catalog policy metadata. Optionally include a limited device inventory."
   },

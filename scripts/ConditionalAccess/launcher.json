@@ -13,7 +13,7 @@
       "type": "boolean",
       "required": false,
       "default": true,
-      "help": "Requests Member.Read.Hidden in addition to directory read access. Your signed-in account also needs permission to read hidden members. Disabling this can leave hidden-group results incomplete."
+      "help": "Reads hidden members through the shared 365 session. Select Extended read permissions before login for Member.Read.Hidden; your account also needs the hidden-member reader role. Disabling this can leave hidden-group results incomplete."
     },
     {
       "name": "IncludeFilterContext",
@@ -21,7 +21,7 @@
       "type": "boolean",
       "required": false,
       "default": true,
-      "help": "When a device or application filter exists, collect candidate device/service-principal attributes and custom-security-attribute definitions. Requests the two documented custom-attribute read scopes. Rules are preserved, never executed or treated as computed access decisions."
+      "help": "When a device or application filter exists, collect candidate device/service-principal attributes and custom-security-attribute definitions. Select Extended read permissions before login for custom-attribute reads. Rules are preserved as data and are never evaluated as access decisions."
     },
     {
       "name": "UseBetaPolicies",
@@ -75,16 +75,16 @@
   "guide": {
     "overview": "Read all Conditional Access policies and build a linked export containing the objects needed to interpret them. Group references include direct and nested membership; named locations retain IP ranges, countries and trust settings.",
     "prerequisites": [
-      "Choose Login to 365 once and verify the customer tenant. Enable Extended reads for optional references or Intune collection.",
-      "PowerShell 7 on Windows and access to public Microsoft Graph. No Microsoft Graph PowerShell SDK is required.",
-      "A dedicated public client application with device-code sign-in and delegated read permissions. See Technical details for the full permission list and consent setup.",
+      "Windows, PowerShell 7, the Microsoft.Graph.Authentication module and access to public Microsoft Graph. Use the separate local dependency installer if the module is missing.",
+      "Select Extended read permissions before Login to 365 for hidden membership, roles, terms of use, external tenant context, custom attributes and supported network controls.",
+      "Complete the normal Microsoft login window. The launcher discovers your username and tenant, then unlocks reports. No username, tenant ID, application ID or device code is required in report parameters.",
       "A signed-in account allowed to read Conditional Access and directory objects. Hidden groups and custom security attributes require their additional read roles.",
-      "The launcher does not create applications, grant consent, change roles or modify policies."
+      "Reporting uses the shared reader session. Find reader app is read-only; Register reader app is a separate, explicitly confirmed setup action. Administrators review consent and roles separately."
     ],
     "steps": [
-      "Choose Login to 365; the verified tenant and application are reused automatically. No tenant/application entry is needed for each report.",
+      "Choose Login to 365 and verify Logged in as and the displayed customer tenant. The verified session is reused across reports.",
       "Keep hidden membership, filter context and newer policy fields enabled for the fullest supported export. Check the documented permission requirements.",
-      "Choose Run report. Follow the Microsoft sign-in address and one-time code shown in Status and sign-in.",
+      "Choose Run report. Collection uses the existing session; Microsoft may require another normal login if tenant policy or session expiry requires it.",
       "Review the policy rows first in Record table, followed by referenced-object rows. Inspect any Partial, AccessDenied, Unresolved or Unsupported status.",
       "Open report folder. conditional-access.json is the full LLM export; conditional-access.md explains policies, groups and locations for a human."
     ],

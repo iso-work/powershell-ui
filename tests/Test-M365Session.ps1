@@ -24,7 +24,8 @@ function Connect-MgGraph {
     $tenant=if($script:Fixture.Mode -eq 'WrongTenant'){'00000000-0000-0000-0000-000000000999'}else{$script:Fixture.TenantId}
     $granted=@($Scopes)
     if($script:Fixture.Mode -eq 'UnexpectedScope') {$granted+='Mail.Send'}
-    $script:Fixture.Identity=[pscustomobject]@{TenantId=$tenant;ClientId=$ClientId;Account='reader@fixture.onmicrosoft.com';Scopes=$granted;ContextScope='Process'}
+    $account=if($script:Fixture.Mode -eq 'MissingAccount'){''}else{'reader@fixture.onmicrosoft.com'}
+    $script:Fixture.Identity=[pscustomobject]@{TenantId=$tenant;ClientId=$ClientId;Account=$account;Scopes=$granted;ContextScope='Process'}
 }
 function Get-MgContext { return $script:Fixture.Identity }
 function Disconnect-MgGraph {
@@ -44,7 +45,21 @@ function Invoke-MgGraphRequest {
     $address=[uri]$Uri
     switch($address.AbsolutePath) {
         '/v1.0/organization' {
+            if($script:Fixture.Mode -eq 'OrgForbidden') {
+                $response=[Net.Http.HttpResponseMessage]::new([Net.HttpStatusCode]::Forbidden)
+                throw [Microsoft.PowerShell.Commands.HttpResponseException]::new('Synthetic access denied. Bearer fixture-secret-do-not-display',$response)
+            }
+            if($script:Fixture.Mode -eq 'DictionaryOrganization') {
+                return @{value=@(@{id=$script:Fixture.Identity.TenantId;displayName='Fixture company';verifiedDomains=@(@{name='fixture.onmicrosoft.com';isInitial=$true;isDefault=$true})})}
+            }
             return [pscustomobject]@{value=@([pscustomobject]@{id=$script:Fixture.Identity.TenantId;displayName='Fixture company';verifiedDomains=@([pscustomobject]@{name='fixture.onmicrosoft.com';isInitial=$true;isDefault=$true})})}
+        }
+        '/v1.0/me' {
+            if($script:Fixture.Mode -eq 'UnauthorizedRead') {
+                $response=[Net.Http.HttpResponseMessage]::new([Net.HttpStatusCode]::Unauthorized)
+                throw [Microsoft.PowerShell.Commands.HttpResponseException]::new('Synthetic session expired',$response)
+            }
+            return [pscustomobject]@{id='fixture-user';userPrincipalName='reader@fixture.onmicrosoft.com';displayName='Fixture reader'}
         }
         '/v1.0/applications' {
             $apps=@()
@@ -139,22 +154,80 @@ try {
         Assert-M365Test ($case.Context.SharedGraph.ClientId -eq '00000000-0000-0000-0000-000000000333') 'Custom client binding missing.'
         Disconnect-M365Session $case.Context
     }
-    Invoke-M365Test 'wrong tenant and unexpected scope rejection' {
-        foreach($mode in @('WrongTenant','UnexpectedScope')) {
-            $case=New-M365TestContext $mode;$blocked=$false
-            try { Connect-M365Session $case.Context -TenantId $case.State.TenantId | Out-Null } catch {$blocked=$true}
-            Assert-M365Test ($blocked -and -not $case.Context.SharedGraph.Ready) ('Unsafe login accepted: '+$mode)
+    Invoke-M365Test 'wrong tenant is rejected' {
+        $case=New-M365TestContext 'WrongTenant';$blocked=$false
+        try { Connect-M365Session $case.Context -TenantId $case.State.TenantId | Out-Null } catch {$blocked=$true}
+        Assert-M365Test ($blocked -and -not $case.Context.SharedGraph.Ready) 'A different tenant must not be accepted.'
+        Disconnect-M365Session $case.Context
+    }
+    Invoke-M365Test 'previously consented token scopes do not block read-only login' {
+        $case=New-M365TestContext 'UnexpectedScope'
+        $connected=Connect-M365Session $case.Context
+        Assert-M365Test ($connected.Ready -and $case.Context.SharedGraph.Ready) 'A pre-existing SDK token grant must not be confused with a requested write operation.'
+        Assert-M365Test (@($case.Context.SharedGraph.AdditionalGrantedScopes) -contains 'Mail.Send') 'Pre-existing grants outside the reader allowlist must be recorded for diagnostics.'
+        $requested=@($case.State.ConnectCalls | ForEach-Object {$_.Scopes})
+        $allowed=@(Get-M365ReadScopes -Extended)
+        Assert-M365Test (@($requested | Where-Object {$_ -notin $allowed}).Count -eq 0 -and 'Mail.Send' -notin $requested) 'Login requested a scope outside the approved reader scope list.'
+        $result=Invoke-M365GraphRequest $case.Context 'https://graph.microsoft.com/v1.0/me'
+        Assert-M365Test ($result.userPrincipalName -eq 'reader@fixture.onmicrosoft.com' -and $case.State.Connects -eq 1) 'The discovered session must remain reusable for GET requests.'
+        Assert-M365Test (@($case.State.Requests | Where-Object Method -ne 'GET').Count -eq 0) 'An existing token grant caused a configuration write.'
+        Disconnect-M365Session $case.Context
+    }
+    Invoke-M365Test 'missing SDK account is resolved through the signed-in user' {
+        $case=New-M365TestContext 'MissingAccount'
+        $connected=Connect-M365Session $case.Context
+        Assert-M365Test ($connected.Ready -and $case.Context.Tenant.Account -eq 'reader@fixture.onmicrosoft.com') 'The signed-in user endpoint must supply the display account when SDK context Account is empty.'
+        Assert-M365Test ([string]::IsNullOrEmpty($case.State.Identity.Account)) 'The fixture must retain the actual empty SDK account to exercise stable context validation.'
+        Assert-M365Test (@($case.State.Requests | Where-Object Uri -match '/v1\.0/me(?:\?|$)').Count -ge 1) 'An empty SDK account must be resolved by a read of the authenticated user.'
+        Invoke-M365GraphRequest $case.Context 'https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies' | Out-Null
+        Assert-M365Test ($case.State.Connects -eq 1) 'Account resolution must not cause another sign-in.'
+        Disconnect-M365Session $case.Context
+    }
+    Invoke-M365Test 'tenant discovery accepts a dictionary organization envelope' {
+        $case=New-M365TestContext 'DictionaryOrganization'
+        $connected=Connect-M365Session $case.Context
+        Assert-M365Test ($connected.Ready -and $case.Context.Tenant.Id -eq $case.State.TenantId -and $case.Context.Tenant.Domain -eq 'fixture.onmicrosoft.com') 'Organization envelopes must support IDictionary as well as PSObject SDK output.'
+        Invoke-M365GraphRequest $case.Context 'https://graph.microsoft.com/v1.0/me' | Out-Null
+        Disconnect-M365Session $case.Context
+    }
+    Invoke-M365Test 'discovery failures identify the stage and status without credentials' {
+        $case=New-M365TestContext 'OrgForbidden';$blocked=$false;$failureText=''
+        try {Connect-M365Session $case.Context | Out-Null}catch{$blocked=$true;$failureText=$_.Exception.Message}
+        $diagnostic=[string]$case.Context.SharedGraph.LastError
+        Assert-M365Test ($blocked -and -not $case.Context.SharedGraph.Ready) 'Denied tenant discovery must leave the session unavailable.'
+        Assert-M365Test ($diagnostic -match 'Tenant discovery' -and $diagnostic -match '403') 'The safe diagnostic must identify tenant discovery and HTTP 403.'
+        Assert-M365Test (($diagnostic+' '+$failureText) -notmatch 'fixture-secret-do-not-display|Bearer') 'Error reporting exposed raw authentication or HTTP details.'
+        Assert-M365Test (@($case.State.Requests | Where-Object Method -ne 'GET').Count -eq 0) 'A failed identity read must not cause a write.'
+        Disconnect-M365Session $case.Context
+    }
+    Invoke-M365Test 'identity and permissions checked before every request' {
+        foreach($changed in @('TenantId','Account','ClientId','Scopes')) {
+            $case=New-M365TestContext;Connect-M365Session $case.Context -TenantId 'fixture.onmicrosoft.com' | Out-Null
+            $count=$case.State.Requests.Count
+            switch($changed) {
+                TenantId {$case.State.Identity.TenantId='00000000-0000-0000-0000-000000000999'}
+                Account {$case.State.Identity.Account='other@fixture.onmicrosoft.com'}
+                ClientId {$case.State.Identity.ClientId='00000000-0000-0000-0000-000000000777'}
+                Scopes {$case.State.Identity.Scopes+=@('Directory.ReadWrite.All')}
+            }
+            $blocked=$false
+            try {Invoke-M365GraphRequest $case.Context 'https://graph.microsoft.com/v1.0/me' | Out-Null}catch{$blocked=$true}
+            Assert-M365Test ($blocked -and $count -eq $case.State.Requests.Count -and -not $case.Context.SharedGraph.Ready) ('Changed '+$changed+' must invalidate the session before HTTP.')
             Disconnect-M365Session $case.Context
         }
     }
-    Invoke-M365Test 'identity and permissions checked before every request' {
-        $case=New-M365TestContext;Connect-M365Session $case.Context -TenantId 'fixture.onmicrosoft.com' | Out-Null
-        $count=$case.State.Requests.Count;$case.State.Identity.TenantId='00000000-0000-0000-0000-000000000999';$blocked=$false
+    Invoke-M365Test 'nested SDK HTTP 401 locks reports until another login' {
+        $case=New-M365TestContext;Connect-M365Session $case.Context | Out-Null
+        $case.State.Mode='UnauthorizedRead';$blocked=$false
         try {Invoke-M365GraphRequest $case.Context 'https://graph.microsoft.com/v1.0/me' | Out-Null}catch{$blocked=$true}
-        Assert-M365Test ($blocked -and $count -eq $case.State.Requests.Count) 'Changed tenant must fail before the HTTP request.'
-        $case.State.Identity.TenantId=$case.State.TenantId;$case.State.Identity.Scopes+=@('Directory.ReadWrite.All');$blocked=$false
+        Assert-M365Test ($blocked -and -not $case.Context.SharedGraph.Ready) 'An SDK HTTP 401 nested by worker invocation must invalidate the session.'
+        Assert-M365Test ($case.Context.SharedGraph.LastError -match 'login to 365 again') 'Expired-session diagnostics must explain that another login is needed.'
+        $count=$case.State.Requests.Count;$blocked=$false
         try {Invoke-M365GraphRequest $case.Context 'https://graph.microsoft.com/v1.0/me' | Out-Null}catch{$blocked=$true}
-        Assert-M365Test ($blocked -and $count -eq $case.State.Requests.Count) 'Write scope must fail before HTTP.'
+        Assert-M365Test ($blocked -and $count -eq $case.State.Requests.Count) 'After HTTP 401, another report must be rejected before contacting Graph.'
+        $case.State.Mode='Complete';Connect-M365Session $case.Context | Out-Null
+        $result=Invoke-M365GraphRequest $case.Context 'https://graph.microsoft.com/v1.0/me'
+        Assert-M365Test ($case.Context.SharedGraph.Ready -and $case.State.Connects -eq 2 -and $result.id -eq 'fixture-user') 'A fresh login must restore report access after expiration.'
         Disconnect-M365Session $case.Context
     }
     Invoke-M365Test 'forbidden URLs cannot use the authenticated worker' {

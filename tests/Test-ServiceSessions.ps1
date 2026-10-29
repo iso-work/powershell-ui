@@ -12,7 +12,7 @@ $bootstrap={
     function global:Import-Module {
         [CmdletBinding()]
         param($Name,$MinimumVersion,[switch]$UseWindowsPowerShell)
-        if($Name -notin @('ExchangeOnlineManagement','Az.Accounts','Microsoft.Online.SharePoint.PowerShell')) { throw 'Unapproved fixture module.' }
+        if($Name -notin @('ExchangeOnlineManagement','Microsoft.Online.SharePoint.PowerShell')) { throw 'Unapproved fixture module.' }
         if($Name -eq 'Microsoft.Online.SharePoint.PowerShell' -and -not $UseWindowsPowerShell) { throw 'SPO compatibility import missing.' }
         $global:ServiceFixture.Imports++
     }
@@ -38,25 +38,13 @@ $bootstrap={
     function global:Get-AcceptedDomain { [CmdletBinding()]param() [pscustomobject]@{Name='Fixture domain';DomainName='fixture.example';DomainType='Authoritative';Default=$true} }
     function global:Get-InboundConnector { [CmdletBinding()]param() @() }
     function global:Get-OutboundConnector { [CmdletBinding()]param() @() }
-    function global:Disable-AzContextAutosave { [CmdletBinding()]param($Scope) if($Scope -ne 'Process'){throw 'Autosave scope must be process.'} }
-    function global:Update-AzConfig {
-        [CmdletBinding()]
-        param([bool]$EnableLoginByWam,[bool]$EnableErrorRecordsPersistence,[bool]$EnableDataCollection,$Scope)
-        if($Scope -ne 'Process' -or $EnableLoginByWam -or $EnableErrorRecordsPersistence -or $EnableDataCollection) { throw 'Azure configuration must be process-only and use browser login.' }
-    }
-    function global:Connect-AzAccount {
-        [CmdletBinding()]param($Tenant,$Scope,[switch]$SkipContextPopulation,$AccountId)
-        if($Tenant -ne $global:ServiceFixture.ExpectedTenant -or $Scope -ne 'Process' -or -not $SkipContextPopulation) { throw 'Azure connect must be bound to selected tenant.' }
-        $global:ServiceFixture.LoginCount++
-    }
-    function global:Get-AzContext { [CmdletBinding()]param() [pscustomobject]@{Tenant=[pscustomobject]@{Id=$global:ServiceFixture.ActualTenant}} }
-    function global:Get-AzSubscription {
-        [CmdletBinding()]param($TenantId)
-        if($TenantId -ne $global:ServiceFixture.ExpectedTenant) { throw 'Subscription read tenant mismatch.' }
-        [pscustomobject]@{Id='fixture-subscription';Name='Fixture subscription';TenantId=$TenantId;State='Enabled'}
-    }
-    function global:Disconnect-AzAccount { [CmdletBinding()]param($Scope) if($Scope -ne 'Process'){throw 'Wrong disconnect scope.'};$global:ServiceFixture.DisconnectCount++ }
-    function global:Clear-AzContext { [CmdletBinding()]param($Scope,[switch]$Force) if($Scope -ne 'Process'){throw 'Wrong clear scope.'};$global:ServiceFixture.Cleared++ }
+    
+    
+    
+    
+    
+    
+    
     function global:Invoke-WebRequest {
         [CmdletBinding()]param($Uri,$Method,$MaximumRedirection,[switch]$SkipHttpErrorCheck,$TimeoutSec)
         if($Uri -ne 'https://fixture-admin.sharepoint.com/_vti_bin/client.svc' -or $Method -ne 'Get' -or $MaximumRedirection -ne 0 -or -not $SkipHttpErrorCheck) { throw 'Unexpected SPO realm probe.' }
@@ -96,7 +84,7 @@ $context=@{
 $stores=@{};$checks=0
 Initialize-LauncherServiceSessions $context
 try {
-    foreach($service in @('ExchangeOnline','Azure','SharePointOnline')) {
+    foreach($service in @('ExchangeOnline','SharePointOnline')) {
         $store=[hashtable]::Synchronized(@{ExpectedTenant=$tenantId;ActualTenant=$tenantId;Imports=0;LoginCount=0;DisconnectCount=0;Cleared=0;FailCollection=$false})
         $stores[$service]=$store
         $entry=New-ServiceFixtureEntry $service $store
@@ -105,7 +93,7 @@ try {
         Assert-ServiceFixture ($connected.TenantId -eq $tenantId -and $store.LoginCount -eq 1) ($service+' must connect exactly once to selected tenant.')
         $reused=Connect-LauncherService $context $service
         Assert-ServiceFixture ($reused.Reused -and $store.LoginCount -eq 1 -and [object]::ReferenceEquals($context.Services[$service].Runspace,$entry.Runspace)) ($service+' must retain/reuse its runspace.')
-        $operation=switch($service){ExchangeOnline{'ExchangeConfiguration'} Azure{'AzureSubscriptions'} SharePointOnline{'SharePointSites'}}
+        $operation=switch($service){ExchangeOnline{'ExchangeConfiguration'}  SharePointOnline{'SharePointSites'}}
         $first=Invoke-LauncherServiceRead $context $service $operation
         $second=Invoke-LauncherServiceRead $context $service $operation
         Assert-ServiceFixture ($first.TenantId -eq $tenantId -and -not $first.Incomplete -and $second.Records.Count -gt 0 -and $store.LoginCount -eq 1) ($service+' reads must reuse sign-in and return scoped data.')
@@ -137,14 +125,13 @@ try {
     Assert-ServiceFixture (($partial | ConvertTo-Json -Depth 20) -notmatch 'Secret-fixture-token') 'Raw service error bodies must not be exported.'
     $checks++
     $blocked=$false
-    try { Invoke-LauncherServiceRead $context Azure ExchangeConfiguration | Out-Null } catch { $blocked=$true }
+    try { Invoke-LauncherServiceRead $context SharePointOnline ExchangeConfiguration | Out-Null } catch { $blocked=$true }
     Assert-ServiceFixture $blocked 'Cross-service operation must be rejected before execution.'
-    Assert-ServiceFixture (@(Get-LauncherServiceStatus $context).Count -eq 3) 'Connection overview must describe retained services.'
+    Assert-ServiceFixture (@(Get-LauncherServiceStatus $context).Count -eq 2) 'Connection overview must describe retained services.'
     $checks++
     Disconnect-LauncherServices $context
     Assert-ServiceFixture ($context.Services.Count -eq 0) 'Logout must remove all retained service entries.'
     foreach($store in $stores.Values) { Assert-ServiceFixture ($store.DisconnectCount -ge 1) 'Every service must disconnect on cleanup.' }
-    Assert-ServiceFixture ($stores.Azure.Cleared -ge 1) 'Azure process contexts must be cleared.'
     $checks++
     $spoStore=[hashtable]::Synchronized(@{ExpectedTenant=$tenantId;ActualTenant=$otherTenant;Imports=0;LoginCount=0;DisconnectCount=0;Cleared=0;FailCollection=$false})
     $context.Services.SharePointOnline=New-ServiceFixtureEntry SharePointOnline $spoStore
@@ -152,5 +139,5 @@ try {
     try { Connect-LauncherService $context SharePointOnline | Out-Null } catch { $blocked=$true }
     Assert-ServiceFixture ($blocked -and $spoStore.LoginCount -eq 0) 'Wrong SharePoint realm must be rejected before browser authentication.'
     $checks++
-    "PASS: $checks retained-service scenarios: browser options, process-only Azure settings, one-login reuse, fixed read allowlists, tenant binding, partial failures, redaction and complete logout. No cloud connection was made."
+    "PASS: $checks retained-service scenarios: browser options, one-login reuse, fixed read allowlists, tenant binding, partial failures, redaction and complete logout. No cloud connection was made."
 } finally { Disconnect-LauncherServices $context }

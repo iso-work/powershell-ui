@@ -1,10 +1,10 @@
 param([hashtable]$Parameters,[hashtable]$Context)
 $ErrorActionPreference='Stop'
-foreach($key in @('ExchangeOnline','Azure','SharePointOnline')) {if(-not $Parameters.ContainsKey($key) -or $Parameters[$key] -isnot [bool]){throw 'Service selections must be Boolean values.'}}
+foreach($key in @('ExchangeOnline','SharePointOnline')) {if(-not $Parameters.ContainsKey($key) -or $Parameters[$key] -isnot [bool]){throw 'Service selections must be Boolean values.'}}
 $records=[Collections.Generic.List[object]]::new();$statuses=[Collections.Generic.List[object]]::new();$limitations=[Collections.Generic.List[string]]::new();$incomplete=$false
-foreach($service in @('ExchangeOnline','Azure','SharePointOnline')) {
+foreach($service in @('ExchangeOnline','SharePointOnline')) {
     if(-not $Parameters[$service]) {continue}
-    $operation=switch($service){'ExchangeOnline'{'ExchangeConfiguration'} 'Azure'{'AzureSubscriptions'} 'SharePointOnline'{'SharePointSites'}}
+    $operation=switch($service){'ExchangeOnline'{'ExchangeConfiguration'} 'SharePointOnline'{'SharePointSites'}}
     try {
         $result=Invoke-LauncherServiceRead -Context $Context -Service $service -Operation $operation
         if($result.Incomplete){$incomplete=$true}
