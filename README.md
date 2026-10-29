@@ -1,8 +1,16 @@
 # PowerShell infrastructure reports and tools
 
-Windows desktop launcher for five read-only reporting workflows and one reviewed Halo appointment manager extension. Select a tool, read its purpose and directions, enter parameters, and run it. Results appear as a readable report, a record table, and structured JSON. Every launcher run writes local report.json and report.md, including explicit instructions for an LLM.
+Windows desktop launcher for seven read-only reporting workflows and one reviewed Halo appointment manager extension. Select a tool, read its purpose and directions, enter parameters, and run it. Results appear as a readable report, a record table, and structured JSON. Every launcher run writes local report.json and report.md, including explicit instructions for an LLM.
 
 Halo is the explicit write-capable exception: the launcher prepares local extension files, while live appointment completion requires a separate reviewed selection and confirmation inside Halo. Other reports remain read-only.
+
+## Microsoft 365: start here
+
+Use **Login to 365** to sign in through Microsoft's normal login window and verify the customer tenant once. Conditional Access, Intune and **365 security and logs** reuse the retained Graph session and automatically receive the tenant/application information. Use **Extended reads** for optional references and Intune. Connect Exchange, Azure and SharePoint separately only when needed; their connections stay open for fixed read operations until logout/exit.
+
+**Find reader app** searches the launcher's existing app. **Register reader app** is a separately confirmed setup write that creates a secretless public reader app without silently granting consent or roles. **Install prerequisites** explicitly installs the pinned local modules. **Search downloaded logs** asks what issue to search after logs have been downloaded and reads verified local files without signing in again.
+
+See [Microsoft 365 session guide](docs/M365-Session-Guide.md) for setup, permission profiles, coverage, privacy and live-validation limits. It supersedes older per-report device-code setup instructions below. The legacy AZQR native executable retains its separate service-principal credential requirement.
 
 ## Launch
 
@@ -132,7 +140,7 @@ Output location can be changed:
 
     pwsh -STA -File .\Start-PowerShellUI.ps1 -OutputRoot D:\Reports
 
-Cancellation cannot undo work already performed. The five reports collect target data and write requested local artifacts. Halo preparation also writes only local files; confirmed live appointment completion occurs separately in the browser.
+Cancellation cannot undo work already performed. The seven reports collect target data and write requested local artifacts. Halo preparation also writes only local files; confirmed live appointment completion occurs separately in the browser.
 
 ## Source snapshots and GitHub
 

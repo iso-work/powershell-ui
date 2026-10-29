@@ -50,6 +50,7 @@ function Invoke-CaGet([string]$Uri,[string]$InitialUri) {
         if([DateTime]::UtcNow -ge $state.Deadline -or $state.Requests -ge 100000) { throw 'Collection safety limit reached.' }
         $state.Requests++
         try {
+            if($sharedGraph) { return Invoke-M365GraphRequest -Context $Context -Uri $Uri }
             return Invoke-RestMethod -Method Get -Uri $Uri -Headers $headers -TimeoutSec 90 -MaximumRedirection 0 -ErrorAction Stop
         } catch {
             $code=Get-CaHttpStatus $_
@@ -176,6 +177,7 @@ function Resolve-CaNode($Node) {
         'ServicePrincipal' { $read=Get-CaObject ("/beta/servicePrincipals/$id") '?$select=id,appId,displayName,accountEnabled,servicePrincipalType,appOwnerOrganizationId,tags' }
         'NamedLocation' { $read=Get-CaObject ("/beta/identity/conditionalAccess/namedLocations/$id") }
         'AuthenticationContext' { $read=Get-CaObject ("/beta/identity/conditionalAccess/authenticationContextClassReferences/$id") }
+        'PolicyTemplate' { $read=Get-CaObject ("/beta/identity/conditionalAccess/templates/$id") }
         'AuthenticationStrength' {
             $read=Get-CaObject ("/v1.0/policies/authenticationStrengthPolicies/$id")
             if($read.Status -eq 'Resolved') {
@@ -321,6 +323,8 @@ function Convert-CaCell($Value) {
     return [regex]::Replace($text,'([\\`*_{}\[\]()!#~|])','\$1')
 }
 
+$sharedGraph=$Context.ContainsKey('SharedGraph') -and $Context.SharedGraph.Ready
+if($sharedGraph) { $Parameters=@{}+$Parameters;$Parameters['TenantId']=$Context.Tenant.Id;$Parameters['ClientId']=$Context.SharedGraph.ClientId }
 $tenant=Resolve-LauncherTenant ([string]$Parameters['TenantId'])
 $client=([guid]$Parameters['ClientId']).ToString()
 if([guid]$client -eq [guid]::Empty) { throw 'A nonempty application ID is required.' }
@@ -335,10 +339,12 @@ if($Parameters.ContainsKey('MaxMinutes')) {
 }
 if($minutes -lt 1 -or $minutes -gt 1440) { throw 'MaxMinutes must be between 1 and 1440.' }
 $tokenKey='GraphConditionalAccess'
-if(-not $Context.ContainsKey('Tokens') -or $Context.Tokens[$tokenKey] -isnot [Security.SecureString] -or
-    -not $Context.ContainsKey('TokenMetadata') -or -not $Context.TokenMetadata.ContainsKey($tokenKey)) { throw 'Use the launcher Conditional Access sign-in.' }
+if(-not $sharedGraph -and (-not $Context.ContainsKey('Tokens') -or $Context.Tokens[$tokenKey] -isnot [Security.SecureString] -or
+    -not $Context.ContainsKey('TokenMetadata') -or -not $Context.TokenMetadata.ContainsKey($tokenKey))) { throw 'Use Login to 365 before running Conditional Access.' }
+if(-not $sharedGraph) {
 $metadata=$Context.TokenMetadata[$tokenKey]
 if($metadata.Tenant -ne $tenant -or $metadata.Client -ne $client -or $metadata.Profile -ne 'ConditionalAccess' -or $metadata.Expires -le [DateTime]::UtcNow) { throw 'The in-memory sign-in does not match this tenant/application or has expired.' }
+}
 if(-not $Context.ContainsKey('RunDirectory') -or -not (Test-Path -LiteralPath $Context.RunDirectory -PathType Container)) { throw 'A launcher run directory is required.' }
 $state=@{
     Nodes=[ordered]@{};Queue=[Collections.Generic.Queue[string]]::new()
@@ -363,9 +369,11 @@ $llmInstructions=@(
 )
 $started=[DateTime]::UtcNow
 try {
+    if(-not $sharedGraph) {
     $buffer=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($Context.Tokens[$tokenKey])
     $headers=@{Authorization=('Bearer '+[Runtime.InteropServices.Marshal]::PtrToStringBSTR($buffer));Accept='application/json';Prefer='include-unknown-enum-members'}
     [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($buffer); $buffer=[IntPtr]::Zero
+    }
     $Context.Progress.Enqueue('Reading all Conditional Access policies, including disabled and report-only policies.')
     $policyCollection=Get-CaCollection ("/$policyVersion/identity/conditionalAccess/policies")
     if($policyCollection.Status -ne 'Complete' -and $policyCollection.Items.Count -eq 0) { throw 'Policy enumeration failed; no complete export is available.' }
@@ -378,6 +386,8 @@ try {
         if([string](Get-CaValue $rawPolicy 'id') -ne $id) { throw 'Policy detail ID differs from requested ID.' }
         $policy=[pscustomobject]@{Id=$id;Name=[string](Get-CaValue $rawPolicy 'displayName');State=[string](Get-CaValue $rawPolicy 'state');DetailStatus=$detail.Status;RawPolicy=$rawPolicy;References=[Collections.Generic.List[object]]::new();HandledPaths=@{};UnknownReferencePaths=[Collections.Generic.List[string]]::new();Filters=[Collections.Generic.List[object]]::new()}
         $policies.Add($policy)
+        $templateId=[string](Get-CaValue $rawPolicy 'templateId')
+        if($templateId) { Add-CaReference $policy 'templateId' 'PolicyTemplate' $templateId }
         foreach($mode in @('include','exclude')) {
             foreach($spec in @(@{Suffix='Users';Kind='User'},@{Suffix='Groups';Kind='Group'},@{Suffix='Roles';Kind='Role'})) { Add-CaReferenceArray $policy ('conditions.users.'+$mode+$spec.Suffix) $spec.Kind }
             Add-CaReferenceArray $policy ('conditions.locations.'+$mode+'Locations') 'NamedLocation'
@@ -391,7 +401,7 @@ try {
         Add-CaReferenceArray $policy 'grantControls.customAuthenticationFactors' 'CustomControl'
         $strengthId=[string](Get-CaPath $rawPolicy 'grantControls.authenticationStrength.id')
         if($strengthId) { Add-CaReference $policy 'grantControls.authenticationStrength.id' 'AuthenticationStrength' $strengthId }
-        elseif($null -ne (Get-CaValue $rawPolicy 'grantControls')) {
+        elseif($null -ne (Get-CaValue $rawPolicy 'grantControls') -and -not ((Get-CaValue $rawPolicy 'grantControls') -is [Collections.IDictionary] -and (Get-CaValue $rawPolicy 'grantControls').Contains('authenticationStrength')) -and $null -eq (Get-CaValue $rawPolicy 'grantControls').PSObject.Properties['authenticationStrength']) {
             # authenticationStrength is a navigation property; some responses omit it.
             $strength=Get-CaObject ("/$policyVersion/identity/conditionalAccess/policies/$id/grantControls/authenticationStrength") -OptionalNotFound
             if($strength.Status -eq 'Resolved') { Add-CaReference $policy 'grantControls.authenticationStrength.id' 'AuthenticationStrength' ([string](Get-CaValue $strength.Object 'id')) }

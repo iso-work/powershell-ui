@@ -1,3 +1,11 @@
+CURRENT LAUNCHER AUTHENTICATION
+Choose Login to 365 once, verify the customer tenant, then run this report.
+Tenant/application IDs are supplied by the shared Graph SDK session. Enable
+Extended reads for Intune or optional CA references. The GUI uses normal Microsoft
+login windows, not device codes. SDK tokens renew in process when permitted.
+See docs\M365-Session-Guide.md; it supersedes older device-code/setup text below.
+App registration is a separately confirmed setup action, never a report side effect.
+
 INTUNEMANAGEMENT - READ-ONLY INVENTORY
 
 PURPOSE

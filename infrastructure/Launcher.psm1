@@ -1,21 +1,28 @@
 Set-StrictMode -Version Latest
+Import-Module (Join-Path $PSScriptRoot 'M365Session.psm1') -Global
+Import-Module (Join-Path $PSScriptRoot 'ServiceSessions.psm1') -Global
 function New-LauncherSession {
-    @{
+    $session=@{
         Credentials=[hashtable]::Synchronized(@{})
         Tokens=[hashtable]::Synchronized(@{})
         TokenMetadata=[hashtable]::Synchronized(@{})
         Progress=[Collections.Concurrent.ConcurrentQueue[string]]::new()
         NativeProcesses=[Collections.Concurrent.ConcurrentBag[Diagnostics.Process]]::new()
     }
+    Initialize-M365Session $session
+    return $session
 }
 function Clear-LauncherSession {
     param([hashtable]$Session)
+    Disconnect-LauncherServices $Session
+    Disconnect-M365Session $Session
     foreach($process in $Session.NativeProcesses) {
         try { if(-not $process.HasExited) { $process.Kill($true); $process.WaitForExit(5000) | Out-Null }; $process.Dispose() } catch {}
     }
     foreach($credential in @($Session.Credentials.Values)) { $credential.Password.Dispose() }
     foreach($token in @($Session.Tokens.Values)) { $token.Dispose() }
     $Session.Credentials.Clear(); $Session.Tokens.Clear(); $Session.TokenMetadata.Clear()
+    if($Session.ContainsKey('Tenant')) { foreach($key in @($Session.Tenant.Keys)) { $Session.Tenant[$key]='' } }
 }
 function Resolve-LauncherTenant {
     param([string]$Value)
@@ -180,15 +187,23 @@ function Invoke-LauncherAdapter {
     $result=[pscustomobject]@{Summary='Collection did not complete.';Records=@();Limitations=@('No complete data was collected.')}
     $status='Completed'; $errorMessage=''
     try {
-        if($Manifest.ContainsKey('auth') -and $Manifest.auth -eq 'Graph') { Connect-LauncherGraph $Parameters $Context }
-        if($Manifest.ContainsKey('auth') -and $Manifest.auth -eq 'GraphConditionalAccess') { Connect-LauncherGraph $Parameters $Context -Profile ConditionalAccess }
+        $shared=$Context.ContainsKey('SharedGraph') -and $Context.SharedGraph.Ready
+        if($Manifest.ContainsKey('auth') -and $Manifest.auth -in @('Graph','GraphConditionalAccess','M365')) {
+            if($shared) {
+                $Parameters=@{}+$Parameters
+                $Parameters['TenantId']=$Context.Tenant.Id;$Parameters['ClientId']=$Context.SharedGraph.ClientId
+            } elseif($Manifest.auth -eq 'M365' -or ($Manifest.ContainsKey('sessionOnly') -and $Manifest.sessionOnly)) {
+                throw 'Choose Login to 365 before running this report.'
+            } elseif($Manifest.auth -eq 'Graph') { Connect-LauncherGraph $Parameters $Context }
+            else { Connect-LauncherGraph $Parameters $Context -Profile ConditionalAccess }
+        }
         $result=& $EntryPath -Parameters $Parameters -Context $Context
         if($null -eq $result -or $null -eq $result.Summary -or $null -eq $result.Records) { throw 'Adapter did not return the expected report structure.' }
         if($result.Summary.PSObject.Properties.Name -contains 'Incomplete' -and $result.Summary.Incomplete) { $status='Partial' }
     } catch {
         $status='Failed'
         # Authentication/HTTP/native exceptions can contain credentials or returned data.
-        $errorMessage='Collection failed. Check parameters, installed prerequisites, read permissions and sign-in. No success or empty-data conclusion can be drawn.'
+        $errorMessage=if($Manifest.ContainsKey('auth') -and $Manifest.auth -in @('Graph','GraphConditionalAccess','M365') -and -not ($Context.ContainsKey('SharedGraph') -and $Context.SharedGraph.Ready)) {'Microsoft 365 is not connected. Choose Login to 365, verify the tenant, and run this report again.'}else{'Collection failed. Check parameters, installed prerequisites, read permissions and sign-in. No success or empty-data conclusion can be drawn.'}
         $Context.Progress.Enqueue($errorMessage)
     }
     Write-LauncherReport $Manifest $Parameters $result $status $runDirectory $started $errorMessage

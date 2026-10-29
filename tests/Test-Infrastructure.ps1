@@ -12,7 +12,8 @@ foreach($file in $files) {
     Assert ($errors.Count -eq 0) "Syntax errors: $($file.FullName): $errors"
 }
 $catalog=@(Get-ScriptCatalog $root)
-Assert ($catalog.Count -eq 6) 'Expected five reports and one reviewed Halo extension preparation tool.'
+$catalog=@($catalog | Where-Object {$_.Errors.Count -eq 0})
+Assert ($catalog.Count -eq 8) 'Expected seven reports and one reviewed Halo extension preparation tool.'
 Assert (@($catalog | Where-Object { $_.Manifest.id -eq 'conditional-access' -and $_.Manifest.auth -eq 'GraphConditionalAccess' -and $_.Manifest.readOnly }).Count -eq 1) 'Conditional Access requires its own read-only authentication profile.'
 foreach($item in $catalog) { Assert ($item.Errors.Count -eq 0) "Adapter integrity: $($item.Name): $($item.Errors)" }
 Assert (@($catalog | Where-Object Path -match 'upstream').Count -eq 0) 'Upstream management scripts must not be exposed.'
@@ -94,3 +95,9 @@ try {
 & (Join-Path $root 'scripts/HaloAppointmentManager/Test-Adapter.ps1')
 'PASS: launcher syntax, manifest-only discovery, integrity checks, redaction, session cleanup, report roundtrip and partial/failure handling. No live target queries were made.'
 
+
+& (Join-Path $root 'tests/Test-M365Session.ps1')
+& (Join-Path $root 'tests/Test-ServiceSessions.ps1')
+& (Join-Path $root 'scripts/M365Security/Test-Adapter.ps1')
+
+& (Join-Path $root 'scripts/ServiceInventory/Test-Adapter.ps1')

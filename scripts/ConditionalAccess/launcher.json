@@ -8,22 +8,6 @@
   "auth": "GraphConditionalAccess",
   "parameters": [
     {
-      "name": "TenantId",
-      "label": "Microsoft Entra tenant",
-      "type": "text",
-      "required": true,
-      "placeholder": "contoso.onmicrosoft.com or tenant GUID",
-      "help": "Enter the tenant GUID or verified tenant domain. The report reads this tenant through interactive Microsoft sign-in."
-    },
-    {
-      "name": "ClientId",
-      "label": "Read-only public client application ID",
-      "type": "text",
-      "required": true,
-      "placeholder": "Application (client) GUID",
-      "help": "Use an Entra public client app with device-code flow enabled and the documented delegated read permissions already consented. No application secret or password belongs in this field."
-    },
-    {
       "name": "IncludeHiddenMembership",
       "label": "Read hidden group membership",
       "type": "boolean",
@@ -72,7 +56,14 @@
   },
   "output": {
     "defaultView": "table",
-    "primaryColumns": ["RecordType", "Name", "State", "ResolutionStatus", "ReferenceCount", "UnresolvedReferences"],
+    "primaryColumns": [
+      "RecordType",
+      "Name",
+      "State",
+      "ResolutionStatus",
+      "ReferenceCount",
+      "UnresolvedReferences"
+    ],
     "columnLabels": {
       "RecordType": "Object type",
       "ResolutionStatus": "Read / resolution",
@@ -84,13 +75,14 @@
   "guide": {
     "overview": "Read all Conditional Access policies and build a linked export containing the objects needed to interpret them. Group references include direct and nested membership; named locations retain IP ranges, countries and trust settings.",
     "prerequisites": [
+      "Choose Login to 365 once and verify the customer tenant. Enable Extended reads for optional references or Intune collection.",
       "PowerShell 7 on Windows and access to public Microsoft Graph. No Microsoft Graph PowerShell SDK is required.",
       "A dedicated public client application with device-code sign-in and delegated read permissions. See Technical details for the full permission list and consent setup.",
       "A signed-in account allowed to read Conditional Access and directory objects. Hidden groups and custom security attributes require their additional read roles.",
       "The launcher does not create applications, grant consent, change roles or modify policies."
     ],
     "steps": [
-      "Open Parameters and enter the tenant domain/GUID and public client application GUID.",
+      "Choose Login to 365; the verified tenant and application are reused automatically. No tenant/application entry is needed for each report.",
       "Keep hidden membership, filter context and newer policy fields enabled for the fullest supported export. Check the documented permission requirements.",
       "Choose Run report. Follow the Microsoft sign-in address and one-time code shown in Status and sign-in.",
       "Review the policy rows first in Record table, followed by referenced-object rows. Inspect any Partial, AccessDenied, Unresolved or Unsupported status.",
@@ -108,5 +100,6 @@
       "Custom authentication-factor definitions and legacy MFA trusted IPs are explicit verification gaps when referenced. Microsoft-defined suites and All selectors remain symbolic.",
       "Credentials/tokens remain in launcher session memory and are cleared on exit. Exports contain sensitive identity and network data; sharing with an LLM is manual."
     ]
-  }
+  },
+  "sessionOnly": true
 }

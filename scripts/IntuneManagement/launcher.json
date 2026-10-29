@@ -7,22 +7,6 @@
   "auth": "Graph",
   "parameters": [
     {
-      "name": "TenantId",
-      "label": "Tenant ID or verified tenant domain",
-      "type": "text",
-      "required": true,
-      "default": "",
-      "help": "Microsoft Entra tenant GUID or verified domain, for example contoso.onmicrosoft.com. Used by the launcher's device-code sign-in."
-    },
-    {
-      "name": "ClientId",
-      "label": "Public client application ID",
-      "type": "text",
-      "required": true,
-      "default": "",
-      "help": "Application ID of an existing public-client app registration configured for device-code authentication and the read-only delegated Graph permissions described in directions.txt."
-    },
-    {
       "name": "IncludeDevices",
       "label": "Include managed device inventory",
       "type": "boolean",
@@ -50,16 +34,18 @@
       "Microsoft sign-in is separate from saved directory and Azure application credentials. Its access token is reused in launcher memory and cleared on exit."
     ],
     "prerequisites": [
+      "Choose Login to 365 once and verify the customer tenant. Enable Extended reads for optional references or Intune collection.",
       "Your Microsoft Entra tenant ID or verified tenant domain, such as contoso.onmicrosoft.com.",
       "The application ID of an existing public client registration configured for device-code sign-in.",
       "The read permissions listed in Technical details, an Intune license, and an account with visibility into the intended scope."
     ],
     "steps": [
-      "Open Parameters. Enter your tenant and the public client application ID.",
+      "Choose Login to 365; the verified tenant and application are reused automatically. No tenant/application entry is needed for each report.",
       "Optionally select Include managed device inventory.",
       "Choose Run report. Sign-in instructions and a one-time code will appear in the status area.",
       "Complete Microsoft sign-in in your browser, then return to the launcher for the report."
     ],
     "overview": "Review Intune configuration profiles, compliance policies, applications and settings catalog policy metadata. Optionally include a limited device inventory."
-  }
+  },
+  "sessionOnly": true
 }

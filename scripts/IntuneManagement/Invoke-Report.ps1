@@ -81,12 +81,14 @@ function Get-IntuneHttpStatus {
     return $null
 }
 
+$sharedGraph=$Context.ContainsKey('SharedGraph') -and $Context.SharedGraph.Ready
+if($sharedGraph) { $Parameters=@{}+$Parameters;$Parameters['TenantId']=$Context.Tenant.Id;$Parameters['ClientId']=$Context.SharedGraph.ClientId }
 $tenantId = [string]$Parameters['TenantId']
 if ([string]::IsNullOrWhiteSpace($tenantId) -or [string]::IsNullOrWhiteSpace([string]$Parameters['ClientId'])) {
     throw 'TenantId and ClientId are required. Configure the launcher Graph sign-in first.'
 }
-if (-not $Context.ContainsKey('Tokens') -or $null -eq $Context['Tokens'] -or
-    -not ($Context['Tokens']['Graph'] -is [System.Security.SecureString])) {
+if (-not $sharedGraph -and (-not $Context.ContainsKey('Tokens') -or $null -eq $Context['Tokens'] -or
+    -not ($Context['Tokens']['Graph'] -is [System.Security.SecureString]))) {
     throw 'An in-memory Graph SecureString token from the launcher is required.'
 }
 
@@ -117,12 +119,14 @@ $headers = $null
 $tokenText = $null
 $tokenBuffer = [IntPtr]::Zero
 try {
+    if(-not $sharedGraph) {
     $tokenBuffer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Context['Tokens']['Graph'])
     $tokenText = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenBuffer)
     $headers = @{ Authorization = ('Bearer ' + $tokenText); Accept = 'application/json' }
     $tokenText = $null
     [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenBuffer)
     $tokenBuffer = [IntPtr]::Zero
+    }
 
     foreach ($collection in $collections) {
         $count = 0
@@ -135,7 +139,7 @@ try {
                 Assert-IntuneReadUri -Uri $next -AllowedPath $collection.Path
                 if (-not $seenPages.Add($next)) { throw 'Graph returned a repeated pagination address.' }
                 # The HTTP method and every collection path are fixed; no caller-supplied queries or actions are executed.
-                $page = Invoke-RestMethod -Method Get -Uri $next -Headers $headers -ErrorAction Stop
+                $page = if($sharedGraph) { Invoke-M365GraphRequest -Context $Context -Uri $next } else { Invoke-RestMethod -Method Get -Uri $next -Headers $headers -ErrorAction Stop }
                 if (-not (Test-IntuneProperty -Object $page -Name 'value')) {
                     throw 'Graph collection response is missing its value array.'
                 }

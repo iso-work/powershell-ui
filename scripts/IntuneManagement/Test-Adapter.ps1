@@ -120,10 +120,24 @@ try {
     Assert-Adapter ($manifest.readOnly -eq $true -and $manifest.auth -eq 'Graph') 'Manifest declares read-only Graph auth.'
     Assert-Adapter ($manifest.entryPoint -eq 'Invoke-Report.ps1') 'Upstream GUI is not an executable catalog entry.'
     $testCount++
+    function global:Invoke-M365GraphRequest {
+        param($Context,$Uri)
+        $testHeaders=@{Authorization=('Bearer '+$global:IntuneAdapterTestState.FakeSecret)}
+        try {Invoke-RestMethod -Method Get -Uri $Uri -Headers $testHeaders}
+        finally {$testHeaders.Clear()}
+    }
+    $context.SharedGraph=@{Ready=$true;ClientId='00000000-0000-0000-0000-000000000001'}
+    $parameters.IncludeDevices=$false
+    $context.Tenant=@{Id='00000000-0000-0000-0000-000000000002'}
+    $global:IntuneAdapterTestState.Scenario='Complete'
+    $report=& $adapterPath -Parameters $parameters -Context $context
+    Assert-Adapter (-not $report.Summary.Incomplete -and $report.Summary.RecordCount -eq 4) 'Intune must reuse the shared SDK transport instead of requiring another login.'
+    $testCount++
     Write-Output ('PASS: ' + $testCount + ' Intune adapter mock checks; no network calls made.')
 }
 finally {
     Remove-Item Function:\Invoke-RestMethod -ErrorAction SilentlyContinue
+    Remove-Item Function:\Invoke-M365GraphRequest -ErrorAction SilentlyContinue
     $context.Tokens.Graph.Dispose()
     $context.Clear()
     Remove-Variable -Name IntuneAdapterTestState -Scope Global -ErrorAction SilentlyContinue

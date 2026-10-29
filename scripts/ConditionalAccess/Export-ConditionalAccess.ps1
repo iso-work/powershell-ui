@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$TenantId,
-    [Parameter(Mandatory)][guid]$ClientId,
+    [string]$ClientId,
     [bool]$IncludeHiddenMembership=$true,
     [bool]$IncludeFilterContext=$true,
     [bool]$UseBetaPolicies=$true,
@@ -15,11 +15,11 @@ if(-not $OutputRoot) { $OutputRoot=Join-Path $root 'reports' }
 Import-Module (Join-Path $root 'infrastructure\Catalog.psm1') -Force
 Import-Module (Join-Path $root 'infrastructure\Launcher.psm1') -Force
 $context=New-LauncherSession
-$parameters=@{TenantId=$TenantId;ClientId=$ClientId.ToString();IncludeHiddenMembership=$IncludeHiddenMembership;IncludeFilterContext=$IncludeFilterContext;UseBetaPolicies=$UseBetaPolicies;MaxMinutes=$MaxMinutes}
+$parameters=@{IncludeHiddenMembership=$IncludeHiddenMembership;IncludeFilterContext=$IncludeFilterContext;UseBetaPolicies=$UseBetaPolicies;MaxMinutes=$MaxMinutes}
 try {
     $items=@(Get-ScriptCatalog $root | Where-Object {$_.Manifest.id -eq 'conditional-access'})
     if($items.Count -ne 1 -or $items[0].Errors.Count) { throw 'Conditional Access adapter is missing or failed its integrity check.' }
-    Connect-LauncherGraph $parameters $context -Profile ConditionalAccess -ConsoleSignIn
+    Connect-M365Session $context -TenantId $TenantId -ClientId $ClientId -Extended | Out-Null
     $item=$items[0]
     $report=Invoke-LauncherAdapter $item.Manifest $parameters $context $item.Path $OutputRoot $item.Hash
     $report
