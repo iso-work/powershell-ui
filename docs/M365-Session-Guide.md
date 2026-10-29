@@ -2,12 +2,14 @@
 
 Open Start-Launcher.cmd. Choose **Login to 365** in the left panel.
 
-1. Enter the customer tenant domain or GUID once. Leave the application ID blank to use Microsoft's Graph PowerShell client, or enter a reviewed public reader application's client ID.
-2. Choose **Login to 365** on the Microsoft 365 page. Complete the normal Microsoft login window/browser sign-in. Device-code login is no longer the GUI default.
+1. Click **Login to 365**. No username, tenant GUID or application ID is required in the launcher. Choose your work account in the Microsoft sign-in window.
+2. Complete Microsoft sign-in. The launcher discovers the account, tenant GUID, organization name and verified domain and stores them in the current session. Device-code login is not the default.
 3. Verify the displayed customer name, tenant GUID and account. The launcher reads organization metadata and shares these values across reports. SharePoint's suggested admin URL comes from the initial domain; verify it if the tenant was renamed.
 4. Run Conditional Access or **365 security and logs**. Reports reuse the same Graph worker and its in-process SDK authentication cache. The SDK renews authentication when possible. Microsoft tenant policies, expiry, revoked access or MFA can still require another prompt.
 5. Connect Exchange, Azure or SharePoint only when needed. Each service retains its own connection in an app-owned runspace, so the service inventory can read repeatedly without reconnecting. These services use different token audiences; one Graph token is not reused as an Exchange/ARM/SharePoint token.
 6. Choose **Clear saved session**, switch customer with a new Login action, or close the launcher to disconnect app-owned sessions. This clears local reader state; it does not sign the user out of browsers or erase Microsoft/OS-managed sign-in cookies and caches.
+
+For MSP customer access, use **Advanced / switch customer** only when you deliberately want a different organization. An employee login alone cannot identify which customer they intend to inspect. The discovered organization is shown before collection. Advanced fields stay blank by default; a discovered GUID is not copied into an override for the next login. Custom single-tenant apps reuse an already verified tenant; before first discovery they require an explicit advanced target.
 
 ## Prerequisites
 

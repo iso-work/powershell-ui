@@ -6,7 +6,7 @@ Halo is the explicit write-capable exception: the launcher prepares local extens
 
 ## Microsoft 365: start here
 
-Use **Login to 365** to sign in through Microsoft's normal login window and verify the customer tenant once. Conditional Access, Intune and **365 security and logs** reuse the retained Graph session and automatically receive the tenant/application information. Use **Extended reads** for optional references and Intune. Connect Exchange, Azure and SharePoint separately only when needed; their connections stay open for fixed read operations until logout/exit.
+Click **Login to 365** to open Microsoft sign-in directly, without entering a username or tenant GUID in the launcher. The authenticated account and tenant are discovered and saved to the session; verify the displayed organization. Advanced customer/app settings are optional. Conditional Access, Intune and **365 security and logs** reuse the retained Graph session and automatically receive the tenant/application information. Use **Extended reads** for optional references and Intune. Connect Exchange, Azure and SharePoint separately only when needed; their connections stay open for fixed read operations until logout/exit.
 
 **Find reader app** searches the launcher's existing app. **Register reader app** is a separately confirmed setup write that creates a secretless public reader app without silently granting consent or roles. **Install prerequisites** explicitly installs the pinned local modules. **Search downloaded logs** asks what issue to search after logs have been downloaded and reads verified local files without signing in again.
 

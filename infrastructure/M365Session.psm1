@@ -46,20 +46,28 @@ function Assert-M365ReadContext {
 }
 function Connect-M365Session {
     [CmdletBinding()]
-    param([hashtable]$Context,[Parameter(Mandatory)][string]$TenantId,[string]$ClientId,[switch]$Extended)
+    param([hashtable]$Context,[string]$TenantId,[string]$ClientId,[switch]$Extended)
     Initialize-M365Session $Context
-    $tenant=Resolve-LauncherTenant $TenantId
+    $tenant=''
+    if(-not [string]::IsNullOrWhiteSpace($TenantId)) { $tenant=Resolve-LauncherTenant $TenantId }
+    elseif($ClientId) {
+        if($Context.Tenant.Id) {$tenant=$Context.Tenant.Id}
+        else {throw 'A custom single-tenant app needs a verified tenant. First sign in with the default Microsoft client, or use Advanced customer settings.'}
+    }
+    $discover=-not [bool]$tenant
     $parsedClient=[guid]::Empty
     if($ClientId -and (-not [guid]::TryParse($ClientId,[ref]$parsedClient) -or $parsedClient -eq [guid]::Empty)) { throw 'Application ID must be a nonempty GUID, or leave it blank for Microsoft Graph PowerShell.' }
     $scopes=@(Get-M365ReadScopes -Extended:$Extended)
+    if($Context.Services.Count){Disconnect-LauncherServices $Context}
+    foreach($key in @($Context.Tenant.Keys)){$Context.Tenant[$key]=''}
     $Context.SharedGraph.Ready=$false
     try {
         $result=@(Invoke-M365Worker $Context {
-            param($tenant,$client,$scopes)
+            param($tenant,$client,$scopes,$discover)
             Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
             if(Get-MgContext) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
             if($client -and (Get-Command Set-MgGraphOption).Parameters.ContainsKey('DisableLoginByWAM')) { Set-MgGraphOption -DisableLoginByWAM $true }
-            $connect=@{TenantId=$tenant;Scopes=$scopes;ContextScope='Process';NoWelcome=$true;ErrorAction='Stop'}
+            $connect=@{TenantId=$(if($discover){'organizations'}else{$tenant});Scopes=$scopes;ContextScope='Process';NoWelcome=$true;ErrorAction='Stop'}
             if($client) { $connect.ClientId=$client }
             Connect-MgGraph @connect | Out-Null
             $identity=Get-MgContext
@@ -67,9 +75,9 @@ function Connect-M365Session {
             $orgs=@($organization.value)
             if($orgs.Count -ne 1 -or $orgs[0].id -ne $identity.TenantId) { throw 'Tenant identity could not be verified.' }
             $domainNames=@($orgs[0].verifiedDomains | ForEach-Object {$_.name})
-            if($tenant -ne $identity.TenantId -and $tenant -notin $domainNames) { throw 'The selected account belongs to a different target tenant.' }
+            if(-not $discover -and $tenant -ne $identity.TenantId -and $tenant -notin $domainNames) { throw 'The selected account belongs to a different target tenant.' }
             [pscustomobject]@{Identity=$identity;Organization=$orgs[0]}
-        } @($tenant,$ClientId,$scopes))
+        } @($tenant,$ClientId,$scopes,$discover))
         $identity=$result[-1].Identity;$org=$result[-1].Organization
         $Context.SharedGraph.TenantId=$identity.TenantId;$Context.SharedGraph.Account=$identity.Account;$Context.SharedGraph.ClientId=$identity.ClientId
         $Context.SharedGraph.Scopes=@($identity.Scopes);$Context.SharedGraph.Generation=[guid]::NewGuid().ToString();$Context.SharedGraph.Ready=$true

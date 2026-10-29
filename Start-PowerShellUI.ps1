@@ -80,9 +80,14 @@ function Add-LoginField([string]$Title,[string]$Hint) {
     $loginFields.Controls.Add($label);$loginFields.Controls.Add($help);$loginFields.Controls.Add($box)
     return $box
 }
-$tenantBox=Add-LoginField 'Customer tenant' 'Enter the tenant domain or GUID once. Sign-in verifies the customer and shares its information across reports.'
+$tenantBox=Add-LoginField 'Customer tenant override (optional)' 'Leave blank for automatic discovery. Use a customer domain or GUID only to deliberately target a different organization.'
 $clientBox=Add-LoginField 'Reader application ID (optional)' 'Leave blank to use Microsoft Graph PowerShell, or use a reviewed reader app. Find an existing reader app or explicitly register one below.'
 $spoBox=Add-LoginField 'SharePoint admin URL' 'Suggested after login; verify this address, especially if the tenant was renamed.'
+$advancedPanel=[Windows.Forms.FlowLayoutPanel]::new();$advancedPanel.FlowDirection='TopDown';$advancedPanel.WrapContents=$false;$advancedPanel.AutoSize=$true;$advancedPanel.AutoSizeMode='GrowAndShrink';$advancedPanel.Visible=$false
+foreach($control in @($loginFields.Controls)){$advancedPanel.Controls.Add($control)}
+$advancedToggle=[Windows.Forms.CheckBox]::new();$advancedToggle.Text='Advanced / switch customer: optional tenant, app ID or SharePoint URL';$advancedToggle.AutoSize=$true
+$advancedToggle.Add_CheckedChanged({$advancedPanel.Visible=$advancedToggle.Checked})
+$loginFields.Controls.Add($advancedToggle);$loginFields.Controls.Add($advancedPanel)
 $extended=[Windows.Forms.CheckBox]::new();$extended.Text='Extended reads: Intune, hidden groups, custom attributes and network references';$extended.AutoSize=$true;$loginFields.Controls.Add($extended)
 $loginActions=[Windows.Forms.FlowLayoutPanel]::new();$loginActions.Width=700;$loginActions.Height=140;$loginActions.WrapContents=$true
 $authButtons=@{}
@@ -93,11 +98,15 @@ foreach($spec in @(@('SignIn','Login to 365'),@('FindApp','Find reader app'),@('
 }
 $loginFields.Controls.Add($loginActions)
 $connectionState=[Windows.Forms.TextBox]::new();$connectionState.Width=680;$connectionState.Height=150;$connectionState.Multiline=$true;$connectionState.ReadOnly=$true;$connectionState.ScrollBars='Vertical';$connectionState.Text='Not connected. Login to 365 opens Microsoft sign-in. Connect additional services only when needed.'
+$connectionState.Text='Click Login to 365 and choose your work account in the Microsoft window. Your username, organization and tenant ID are discovered automatically and saved for this session.'
 $loginFields.Controls.Add($connectionState);$loginTab.Controls.Add($loginFields);$tabs.TabPages.Insert(0,$loginTab)
 $connectionState.Height=70;$loginFields.Controls.SetChildIndex($connectionState,0)
 $loginFields.Add_SizeChanged({
     $width=[Math]::Max(300,$loginFields.ClientSize.Width-30)
     foreach($control in @($tenantBox,$clientBox,$spoBox,$loginActions,$connectionState)){$control.Width=$width}
+    $advancedPanel.MaximumSize=[Drawing.Size]::new($width,0)
+    foreach($control in @($advancedPanel.Controls)){if($control -is [Windows.Forms.Label]){$control.MaximumSize=[Drawing.Size]::new($width-8,0)}else{$control.Width=$width-8}}
+    $advancedToggle.MaximumSize=[Drawing.Size]::new($width,0)
     $extended.MaximumSize=[Drawing.Size]::new($width,0)
     $loginActions.Height=if($width -lt 680){190}else{140}
 })
@@ -243,8 +252,8 @@ function Show-CredentialDialog {
     } finally { $password.Clear(); $username.Clear(); $dialog.Dispose() }
 }
 $credentials.Add_Click({Show-CredentialDialog})
-$forget.Add_Click({Clear-LauncherSession $script:session; $script:session=New-LauncherSession; $status.Text='All app-owned sessions disconnected and credentials cleared.'; $connectionState.Text='Disconnected.';$reportText.Clear();$jsonText.Clear();$grid.DataSource=$null;$script:lastReport=$null;$open.Enabled=$false})
-$login.Add_Click({$tabs.SelectedTab=$loginTab})
+$forget.Add_Click({Clear-LauncherSession $script:session; $script:session=New-LauncherSession; $status.Text='All app-owned sessions disconnected and credentials cleared.'; $connectionState.Text='Disconnected. Click Login to 365 to discover your account and organization.';$tenantBox.Clear();$clientBox.Clear();$spoBox.Clear();$advancedToggle.Checked=$false;$reportText.Clear();$jsonText.Clear();$grid.DataSource=$null;$script:lastReport=$null;$open.Enabled=$false})
+$login.Add_Click({$tabs.SelectedTab=$loginTab;if(-not $script:session.SharedGraph.Ready){Start-M365Operation 'SignIn'}})
 $tabs.Add_SelectedIndexChanged({
     if($tabs.SelectedTab -eq $loginTab){$selectedTitle.Text='Microsoft 365 sessions';$selectedHint.Text='Verify the customer tenant once, then reuse read-only connections across reports.'}
     elseif($list.SelectedItem){$selectedTitle.Text=$list.SelectedItem.DisplayName;$selectedHint.Text=if($list.SelectedItem.Manifest.readOnly){'Read-only report  ·  '+$list.SelectedItem.Name}else{'Write-capable Halo extension  ·  Launcher prepares local files only'}}
@@ -275,12 +284,18 @@ function Start-M365Operation([string]$Operation) {
         $ErrorActionPreference='Stop';Import-Module (Join-Path $root 'infrastructure/Launcher.psm1') -Force
         switch($operation) {
             'SignIn' {
-                $sameTenant=$options.Tenant -and $options.Tenant -in @($context.Tenant.Id,$context.Tenant.Domain)
+                $target=$options.Tenant
+                if(-not $target -and $options.Client -and $context.Tenant.Id){$target=$context.Tenant.Id}
+                $sameTenant=$target -and $target -in @($context.Tenant.Id,$context.Tenant.Domain)
                 if(-not $sameTenant){Clear-LauncherSession $context}
-                Connect-M365Session $context -TenantId $options.Tenant -ClientId $options.Client -Extended:$options.Extended
+                Connect-M365Session $context -TenantId $target -ClientId $options.Client -Extended:$options.Extended
             }
             'FindApp' { if(-not $context.SharedGraph.Ready){Connect-M365Session $context -TenantId $options.Tenant -ClientId $options.Client -Extended:$options.Extended | Out-Null};Find-M365ReaderApplication $context }
-            'RegisterApp' { Disconnect-LauncherServices $context;Register-M365ReaderApplication $context -TenantId $options.Tenant -CreateConfirmed }
+            'RegisterApp' {
+                $target=if($options.Tenant){$options.Tenant}else{$context.Tenant.Id}
+                if(-not $target){throw 'Login to 365 first to discover the tenant, then choose Register reader app.'}
+                Disconnect-LauncherServices $context;Register-M365ReaderApplication $context -TenantId $target -CreateConfirmed
+            }
             'Install' { & (Join-Path $root 'infrastructure/Install-M365Dependencies.ps1');'Local module prerequisites installed. Sign in when ready.' }
             'SearchLogs' {
                 $result=& (Join-Path $root 'scripts/M365Security/Search-DownloadedLogs.ps1') -DownloadFolder $options.Folder -Query $options.Query
@@ -381,7 +396,7 @@ $timer.Add_Tick({
                     $status.Text='Found '+$apps.Count+' matching reader applications. '+$(if($apps.Count -eq 1){'The application ID is selected; review its configuration before signing in.'}else{'Review/select matching applications in Entra. No application was changed.'})
                 }
                 if($script:session.SharedGraph.Ready) {
-                    $tenantBox.Text=$script:session.Tenant.Id;$spoBox.Text=$script:session.Tenant.SharePointAdminUrl
+                    $spoBox.Text=$script:session.Tenant.SharePointAdminUrl
                     $connectionState.Text='Graph: connected'+[Environment]::NewLine+'Tenant: '+$script:session.Tenant.DisplayName+' ('+$script:session.Tenant.Id+')'+[Environment]::NewLine+'Account: '+$script:session.Tenant.Account
                 } else {$connectionState.Text='Graph disconnected. Choose Login to 365 after setup.'}
                 foreach($service in @(Get-LauncherServiceStatus $script:session)){$connectionState.AppendText([Environment]::NewLine+$service.Service+': '+$service.Status)}
@@ -518,6 +533,14 @@ try {
             $script:inputs.HaloUrl.Text='https://halo.ui-fixture.example'
             $form.ShowInTaskbar=$false; $form.StartPosition='Manual'; $form.Location=[Drawing.Point]::new(-30000,-30000); $form.Opacity=0
             $form.Show(); $tabs.SelectedTab=$installTab; [Windows.Forms.Application]::DoEvents()
+            $savedDispatcher=(Get-Command Start-M365Operation).ScriptBlock
+            $script:authClickFixture=''
+            try {
+                Set-Item -LiteralPath Function:\Start-M365Operation -Value {param([string]$Operation) $script:authClickFixture=$Operation}
+                $login.PerformClick()
+                if($script:authClickFixture -ne 'SignIn' -or $tenantBox.Text -or $clientBox.Text -or $advancedToggle.Checked) {throw 'Default Login to 365 must directly start authentication without asking for tenant or app input.'}
+            } finally {Set-Item -LiteralPath Function:\Start-M365Operation -Value $savedDispatcher}
+            $tabs.SelectedTab=$installTab
             $copyExtension.PerformClick()
             if($null -eq $script:job) { throw 'Copy button did not start preparation.' }
             $deadline=[DateTime]::UtcNow.AddSeconds(20)

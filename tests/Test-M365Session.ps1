@@ -97,6 +97,24 @@ function Invoke-M365Test([string]$Name,[scriptblock]$Test) {
     catch { $failures.Add($Name+': '+$_.Exception.Message) }
 }
 try {
+    Invoke-M365Test 'one-click login discovers account and tenant without input' {
+        $case=New-M365TestContext
+        $connected=Connect-M365Session $case.Context
+        Assert-M365Test ($connected.Ready -and $case.State.ConnectCalls[0].Tenant -eq 'organizations') 'Default login must use work-account discovery without a tenant prompt.'
+        Assert-M365Test ($case.Context.Tenant.Id -eq $case.State.TenantId -and $case.Context.Tenant.Account -eq 'reader@fixture.onmicrosoft.com' -and $case.Context.Tenant.DisplayName -eq 'Fixture company') 'Discovered account and tenant must be saved in session.'
+        Invoke-M365GraphRequest $case.Context 'https://graph.microsoft.com/v1.0/me' | Out-Null
+        Assert-M365Test ($case.State.Connects -eq 1) 'A report should reuse the automatically discovered session.'
+        Disconnect-M365Session $case.Context
+    }
+    Invoke-M365Test 'custom app uses a discovered tenant or requests advanced setup' {
+        $case=New-M365TestContext;$blocked=$false
+        try {Connect-M365Session $case.Context -ClientId '00000000-0000-0000-0000-000000000333' | Out-Null}catch{$blocked=$true}
+        Assert-M365Test ($blocked -and $case.State.Connects -eq 0) 'A single-tenant custom app must not use organizations blindly.'
+        Connect-M365Session $case.Context | Out-Null
+        Connect-M365Session $case.Context -ClientId '00000000-0000-0000-0000-000000000333' | Out-Null
+        Assert-M365Test ($case.State.ConnectCalls[-1].Tenant -eq $case.State.TenantId -and $case.Context.SharedGraph.Ready) 'Custom app must reuse the previously verified tenant without asking for its GUID.'
+        Disconnect-M365Session $case.Context
+    }
     Invoke-M365Test 'browser login, discovery and reused worker' {
         $case=New-M365TestContext;$context=$case.Context;$state=$case.State
         $connected=Connect-M365Session $context -TenantId 'fixture.onmicrosoft.com'
